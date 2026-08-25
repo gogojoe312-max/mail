@@ -128,7 +128,7 @@ input,textarea{font-family:inherit;font-size:inherit;color:inherit}
 #dock{flex:0 0 auto;background:var(--toolbar-bg);border-top:1px solid var(--hairline);padding:10px 16px calc(12px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:8px}
 .dk-bar{display:flex;align-items:center;gap:10px}
 .seg{display:flex;background:var(--fill);border-radius:7px;padding:2px;gap:2px}
-.seg button{height:22px;min-width:34px;padding:0 10px;border-radius:5px;font-size:12px;font-weight:500;color:var(--text-2)}
+.seg button{height:22px;padding:0 9px;border-radius:5px;font-size:12px;font-weight:500;color:var(--text-2);white-space:nowrap}
 .seg button[aria-pressed="true"]{background:var(--seg-on);color:var(--text);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.14),0 0 0 .5px rgba(0,0,0,.06)}
 .dk-in{width:100%;resize:none;border:1px solid var(--hairline);border-radius:10px;background:var(--pane-bg);padding:11px 13px;font-size:14px;line-height:1.65;min-height:120px;max-height:46vh;outline:none;-webkit-appearance:none}
 .dk-in:focus{border-color:var(--accent)}
@@ -237,7 +237,7 @@ input,textarea{font-family:inherit;font-size:inherit;color:inherit}
 <div id="dock">
   <textarea class="dk-in" id="dkIn" rows="4" placeholder="用件"></textarea>
   <div class="dk-bar">
-    <div class="seg" id="seg" role="group" aria-label="敬語の強さ"></div>
+    <div class="seg" id="seg" role="group" aria-label="文体"></div>
     <span class="dk-hint" id="dkHint"></span>
     <button class="dk-go" id="dkGo">
       <svg class="icon" viewBox="0 0 24 24" style="stroke-width:1.5"><path d="M12 3.5 13.6 9 19 10.6 13.6 12.2 12 17.7 10.4 12.2 5 10.6 10.4 9z"/></svg>
@@ -294,9 +294,9 @@ const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
 /* ---------- 敬語 ---------- */
 const LEVELS = {
-  weak:  { name:"弱", note:"社内・気心の知れた相手" },
-  mid:   { name:"中", note:"通常の社外・取引先" },
-  strong:{ name:"強", note:"初対面・目上・改まった場面" }
+  weak:  { name:"親しみ",   note:"何度もやり取りしている相手" },
+  mid:   { name:"丁寧",     note:"業界内の通常のやり取り" },
+  strong:{ name:"ビジネス", note:"初めての会社・面識のない相手" }
 };
 const LEVEL_ORDER = ["weak","mid","strong"];
 
@@ -543,9 +543,10 @@ async function generate(intent){
   const m = lastMsg(), box = $("drafts");
   if(!m || !box || !intent) return;
   lastIntent = intent;
-  box.innerHTML = `<div class="thinking"><span class="spin"></span>敬語${esc(L().name)}で「${esc(intent.label)}」の返信を書いています…</div>`;
+  box.innerHTML = `<div class="thinking"><span class="spin"></span>「${esc(L().name)}」で「${esc(intent.label)}」の返信を書いています…</div>`;
   try{
-    const r = await api("reply", { intent:intent.id, hint:intent.hint, subject:m.subject, from:m.from, body:m.body });
+    const r = await api("reply", { intent:intent.id, hint:intent.hint,
+      subject:m.subject, from:m.from, counterpart:m.addr, body:m.body });
     box.innerHTML = (r.drafts||[]).map((d,i) => `
       <div class="draft"><div class="draft-h"><span class="draft-tag">${esc(d.tag||("案"+(i+1)))}</span>
         <span class="tb-spacer"></span><button class="draft-use" data-i="${i}">この案を開く</button></div>
@@ -596,7 +597,7 @@ async function quick(){
   const brief = dkIn.value.trim();
   if(!brief){ dkIn.focus(); return; }
   $("dkGo").disabled = true;
-  $("dkHint").textContent = "読み取って敬語" + L().name + "で組み立てています…";
+  $("dkHint").textContent = "「" + L().name + "」で組み立てています…";
   try{
     const r = await api("quick", { brief });
     openCompose({ to:r.to||"", cc:r.cc||"", subject:r.subject||"",
@@ -645,12 +646,13 @@ $("q").oninput = e => { query = e.target.value.trim(); clearTimeout(qTimer); qTi
 
 $("cpRedo").onclick = redo;
 async function redo(){
-  $("cpHint").textContent = "敬語" + L().name + "で書き直しています…";
+  $("cpHint").textContent = "「" + L().name + "」で書き直しています…";
   try{
     let r;
     if(composeSource && composeSource.kind === "reply"){
       const m = composeSource.msg;
-      r = await api("reply", { intent:composeSource.intent, hint:composeSource.hint, subject:m.subject, from:m.from, body:m.body });
+      r = await api("reply", { intent:composeSource.intent, hint:composeSource.hint,
+        subject:m.subject, from:m.from, counterpart:m.addr, body:m.body });
     }else{
       const brief = (composeSource && composeSource.brief) || $("cpBody").value.trim() || $("cpSubj").value.trim();
       if(!brief){ $("cpHint").textContent = "先に本文か件名を入れてください"; return; }
@@ -659,7 +661,7 @@ async function redo(){
       if(r.to && !$("cpTo").value) $("cpTo").value = r.to;
     }
     if(r.drafts && r.drafts[0]){ $("cpBody").value = r.drafts[0].text; lastGenerated = r.drafts[0].text; }
-    $("cpHint").textContent = "敬語：" + L().name;
+    $("cpHint").textContent = "文体：" + L().name;
   }catch(e){ $("cpHint").textContent = e.message; }
 }
 
@@ -696,9 +698,10 @@ function renderSheet(){
       <div class="d">受信箱 ${esc(VIA)}／送信元 ${esc(ACCOUNT)}</div></div>
       <button class="sh-btn" id="btnTest">確かめる</button></div>
 
-    <div class="sh-sec">敬語</div>
+    <div class="sh-sec">文体</div>
     <div class="sh-row"><div class="k"><div class="n">いま：${esc(lv.name)}（${esc(lv.note)}）</div>
-      <div class="d">画面下の 弱／中／強 でいつでも切り替わります。返信案・新規作成の両方に効きます。</div></div></div>
+      <div class="d">親しみ＝砕けた調子、！も可／丁寧＝硬すぎない自然な文面／ビジネス＝最も改まった文面で名乗りも入る。
+書き出しは相手のアドレス次第で、ufg なら「お疲れ様です。」それ以外は「お世話になっております。」になります。</div></div></div>
 
     <div class="sh-sec">署名</div>
     <div class="sh-row"><div class="k"><div class="n">毎回この署名が付きます</div>
