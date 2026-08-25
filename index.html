@@ -724,7 +724,7 @@ function addrList(raw){
 }
 
 // 全員に返信のCc。自分のアドレスと差出人は外す。
-const MINE = /(@ufg\.co\.jp|@bu\.k-cloud90\.biz)/i;
+const MINE = /j-takasaki@(ufg\.co\.jp|bu\.k-cloud90\.biz)/i;
 function replyAllCc(m){
   const seen = {}, out = [];
   [m.to, m.cc].forEach(f => String(f||"").split(",").forEach(one => {
