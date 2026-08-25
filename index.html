@@ -102,6 +102,8 @@ input,textarea{font-family:inherit;font-size:inherit;color:inherit}
 
 .ai-bar{flex:0 0 auto;border-top:1px solid var(--hairline);background:var(--toolbar-bg);padding:11px 20px 13px}
 .ai-lbl{font-size:11px;font-weight:600;color:var(--text-3);margin-bottom:8px}
+.ai-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}
+.ai-head .ai-lbl{margin:0}
 .chips{display:flex;gap:7px;flex-wrap:wrap;align-items:center}
 .chip{height:27px;padding:0 12px;border-radius:14px;background:var(--pane-bg);border:1px solid var(--hairline);font-size:12px;font-weight:500;white-space:nowrap;display:flex;align-items:center;gap:5px}
 .chip:hover{background:var(--hairline-soft)}
@@ -223,7 +225,10 @@ input,textarea{font-family:inherit;font-size:inherit;color:inherit}
     </div>
     <div class="rd-scroll" id="rdScroll"></div>
     <div class="ai-bar" id="aiBar" hidden>
-      <div class="ai-lbl">返信案をつくる</div>
+      <div class="ai-head">
+        <span class="ai-lbl">返信案をつくる</span>
+        <div class="seg" id="rpSeg" role="group" aria-label="敬語の強さ"></div>
+      </div>
       <div class="chips" id="chips"></div>
     </div>
   </section>
@@ -415,9 +420,10 @@ function renderSeg(el){
     `<button data-lv="${k}" aria-pressed="${settings.level===k}" title="${esc(LEVELS[k].note)}">${LEVELS[k].name}</button>`).join("");
   el.querySelectorAll("[data-lv]").forEach(b => b.onclick = () => {
     settings.level = b.dataset.lv; flush();
-    renderSeg($("seg")); renderSeg($("cpSeg"));
+    refreshSegs();
   });
 }
+function refreshSegs(){ ["seg","cpSeg","rpSeg"].forEach(id => { const el = $(id); if(el) renderSeg(el); }); }
 
 function renderSidebar(){
   $("sbScroll").innerHTML = `<div class="sb-head">${esc(ACCOUNT)}</div>` + MAILBOXES.map(b => {
@@ -481,6 +487,7 @@ function renderReader(){
     return;
   }
   $("btnReply").disabled = false; $("btnArchive").disabled = false; $("aiBar").hidden = false;
+  renderSeg($("rpSeg"));
   const msgs = current.messages || [];
   scroll.innerHTML = `
     <div class="rd-head"><div class="rd-subj">${esc(current.subject)}</div></div>` +
@@ -733,7 +740,7 @@ function renderSheet(){
         const d = migrate(rd.result);
         if(!d){ $("shStatus").textContent = "読み込めませんでした。書き出したファイルを選んでください。"; return; }
         settings = d; flush(); renderSheet(); renderChips();
-        renderSeg($("seg")); renderSeg($("cpSeg")); load();
+        refreshSegs(); load();
         $("shStatus").textContent = "読み込みました。";
       };
       rd.readAsText(file);
@@ -747,7 +754,7 @@ addEventListener("keydown", e => {
   if((e.metaKey||e.ctrlKey) && e.key.toLowerCase() === "n"){ e.preventDefault(); openCompose(); }
 });
 
-renderSeg($("seg")); renderSeg($("cpSeg"));
+refreshSegs();
 autogrow();
 renderReader();
 load();
