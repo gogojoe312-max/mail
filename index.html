@@ -313,6 +313,111 @@ const LEVELS = {
 };
 const LEVEL_ORDER = ["weak","mid","strong"];
 
+/* ============================================================
+   文面のルール。ここを直せば GitHub の更新だけで反映される。
+   Apps Script 側には文面の知識を一切持たせていない。
+   ============================================================ */
+const LEVEL_RULE = {
+  weak:   "「親しみ」。何度もやり取りしている相手向け。失礼にならない範囲で砕けた調子にする。宛名は「◯◯さま」。感嘆符（！）を使ってよい。堅い言い回しや過剰なクッション言葉は避け、短く言い切る。自分の名前や社名は名乗らない（署名に入るため）。結びは「よろしくお願いします。」",
+  mid:    "「丁寧」。音楽業界の実務で日常的にやり取りする相手向け。丁寧だが硬すぎない自然な文面。宛名は「◯◯さま」。過剰な謙譲表現は使わず、必要なところにだけクッション言葉（恐れ入りますが／お手数ですが）を置く。自分の名前や社名は名乗らない（署名に入るため）。結びは「よろしくお願いいたします。」",
+  strong: "「ビジネスメール」。初めて仕事をする会社や、面識のない相手向け。最も改まった文面にする。宛名は会社名・部署名から書き「◯◯様」。挨拶のあとに「株式会社アップフロントワークスの高崎晟でございます。」と名乗る。謙譲語と尊敬語を正しく使い分ける（伺う／拝見する／存じます／ご査収）。断定を避け、依頼は「〜いただけますと幸いです」。結びは「何卒よろしくお願い申し上げます。」"
+};
+
+const STRUCTURE =
+  "日本のビジネスメールの型を守る。宛名 → 挨拶 →（ビジネスメールのみ名乗り）→ 本題 → 結び の順。" +
+  "本文は必ず宛名の行から始める。宛名を省略してはならない。" +
+  "1文は短く。段落の切れ目では1行だけ空ける。空行を2行以上続けない。意味のつながる文は改行せずに続ける。" +
+  "日時・場所・人数・期限などの数値は、読み取れたものだけを書き、勝手に足さない。" +
+  "読み取れない項目は本文に含めず、必要なら相手に尋ねる一文にする。";
+
+// 挨拶は文体ではなく相手のドメインで決まる。ufg は社内。
+function greetingRule(addr){
+  if(addr && /@[^@]*ufg/i.test(addr))
+    return "書き出しの挨拶は「お疲れ様です。」にする。「お世話になっております。」は使わない。";
+  if(addr)
+    return "書き出しの挨拶は「お世話になっております。」にする。「お疲れ様です。」は使わない。";
+  return "書き出しの挨拶は、宛先のメールアドレスの @ より後ろに ufg が含まれるなら「お疲れ様です。」、それ以外は「お世話になっております。」にする。";
+}
+
+function termsBlock(){
+  const t = settings.terms || [];
+  if(!t.length) return "";
+  return "社内で使っている略称・通称。走り書きや受信メールに左の語が出てきたら、書く本文では右の正式名称に直す。\n" +
+    t.map(x => "・" + x.from + " → " + x.to).join("\n");
+}
+
+function baseSystem(counterpart){
+  return [
+    "あなたは日本の音楽制作会社で働く「高崎 晟（たかさき あきら）」本人として、業務メールを書く。",
+    "所属は株式会社アップフロントワークス、肩書きは Music Director。",
+    LEVEL_RULE[settings.level] || LEVEL_RULE.mid,
+    greetingRule(counterpart),
+    STRUCTURE,
+    "署名は書かない。システム側で固定の署名を付けるので、本文は結びの一文で終える。",
+    "絵文字・顔文字は使わない。誇張した表現や過剰な謝罪は避ける。",
+    termsBlock(),
+    settings.memo ? "追加の指示: " + settings.memo : ""
+  ].filter(Boolean).join("\n");
+}
+
+function parseJson(raw){
+  const t = String(raw).replace(/```json|```/g, "").trim();
+  const a = t.indexOf("{"), b = t.lastIndexOf("}");
+  if(a === -1 || b === -1) throw new Error("AI の返答を読み取れませんでした: " + t.slice(0,150));
+  return JSON.parse(t.slice(a, b + 1));
+}
+
+// AI の指示だけでは揺れるので、表示する直前にコード側で必ず整える。
+function polish(body, counterpart){
+  let b = String(body || "").replace(/\r/g, "");
+
+  const lines = b.split("\n");
+  while(lines.length){
+    const t = lines[lines.length - 1].trim();
+    if(t === "" || /^[-–—―‐_=＝ー]{3,}$/.test(t) ||
+       t.indexOf("アップフロントワークス") !== -1 || t.indexOf("UP-FRONT") !== -1 ||
+       t.indexOf("Jo Takasaki") !== -1 || t.indexOf("j-takasaki@") !== -1 ||
+       /^高崎/.test(t) || /^(携帯|Email|E-mail|TEL|Tel|電話)\s*[:：]/.test(t)) lines.pop();
+    else break;
+  }
+  while(lines.length && lines[0].trim() === "") lines.shift();
+  b = lines.join("\n");
+
+  // 名乗りは署名に任せる
+  b = b.replace(/(株式会社)?アップフロントワークスの高崎(晟)?で(す|ございます)[。、]?/g, "")
+       .replace(/高崎(晟)?で(す|ございます)[。、]?/g, "");
+
+  // 挨拶を相手のドメインで固定
+  if(counterpart){
+    const want = /@[^@]*ufg/i.test(counterpart) ? "お疲れ様です。" : "お世話になっております。";
+    b = b.replace(/平素より大変お世話になっております[。、]?/g, want)
+         .replace(/いつも大変お世話になっております[。、]?/g, want)
+         .replace(/いつもお世話になっております[。、]?/g, want)
+         .replace(/お世話になっております[。、]?/g, want)
+         .replace(/お疲れさまです[。、]?/g, want)
+         .replace(/お疲れ様です[。、]?/g, want);
+  }
+
+  // 敬称。ビジネスだけ「様」、それ以外はすべて「さま」。
+  const K1 = "\u0001", K2 = "\u0002";
+  b = b.replace(/お疲れ様です/g, K1).replace(/たくさん/g, K2);
+  if(settings.level === "strong"){
+    b = b.replace(/さま/g, "様").replace(/さん/g, "様");
+  } else {
+    b = b.replace(/さん/g, "さま");
+    const ln = b.split("\n");
+    for(let i = 0; i < ln.length; i++){
+      if(ln[i].trim() === "") continue;
+      ln[i] = ln[i].replace(/様(\s*)$/, "さま$1");
+      break;
+    }
+    b = ln.join("\n");
+  }
+  b = b.split(K1).join("お疲れ様です").split(K2).join("たくさん");
+
+  return b.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").replace(/\s+$/, "");
+}
+
 /* ---------- 保存 ---------- */
 const KEY = "mailai.v1", SCHEMA = 5;
 const store = (() => {
@@ -378,14 +483,26 @@ async function api(action, payload = {}){
     method:"POST",
     headers:{ "Content-Type":"text/plain;charset=utf-8" },
     body: JSON.stringify(Object.assign({
-      action, token: settings.token, level: settings.level,
-      memo: settings.memo || "", terms: settings.terms || [], fast: !!settings.fast
+      action, token: settings.token, fast: !!settings.fast
     }, payload))
   });
   if(!res.ok) throw new Error("ウェブアプリが応答しません（" + res.status + "）");
   const data = await res.json();
   if(data.error) throw new Error(data.error);
   return data;
+}
+
+async function ai(system, user, maxTokens){
+  const r = await api("ai", { system, user, maxTokens });
+  return parseJson(r.text || "");
+}
+
+let contactCache = null;
+async function contacts(){
+  if(contactCache) return contactCache;
+  try { const r = await api("contacts", {}); contactCache = r.contacts || []; }
+  catch(e){ contactCache = []; }
+  return contactCache;
 }
 
 /* ---------- 未接続のときの見本 ---------- */
@@ -407,12 +524,12 @@ function demo(action, p){
     return { id:t.id, subject:t.subject, messages:[{ id:t.id, from:t.from, addr:t.addr, to:t.to, date:t.date, subject:t.subject, body:t.body }] };
   }
   if(action === "read" || action === "archive") return { ok:true };
-  const note = "（未接続のため見本です。設定でウェブアプリをつなぐと、実際に読み取って書き分けます）";
-  if(action === "quick")
-    return { to:"", subject:"（未接続）", note:"ウェブアプリが未接続です",
-      drafts:[{ tag:"見本", text:"お世話になっております。\n株式会社アップフロントワークスの高崎です。\n\n" + (p.brief||"") + "\n\n" + note + "\n\nよろしくお願いいたします。\n\n" + SIGNATURE }] };
-  if(action === "reply")
-    return { drafts:[{ tag:"見本", text:"お世話になっております。\n株式会社アップフロントワークスの高崎です。\n\n" + note + "\n\nよろしくお願いいたします。\n\n" + SIGNATURE }] };
+  if(action === "contacts") return { contacts: [] };
+  if(action === "ai") return { text: JSON.stringify({
+    to:"", cc:"", subject:"（未接続）", note:"ウェブアプリが未接続です",
+    body:"ご担当者さま\n\nお世話になっております。\n\n設定でウェブアプリをつなぐと、実際に読み取って書き分けます。\n\nよろしくお願いいたします。",
+    drafts:[{ tag:"見本", text:"ご担当者さま\n\nお世話になっております。\n\n設定でウェブアプリをつなぐと、実際に読み取って書き分けます。\n\nよろしくお願いいたします。" }]
+  }) };
   if(action === "send") throw new Error("ウェブアプリが未接続です");
   return {};
 }
@@ -609,9 +726,27 @@ async function generate(intent){
   draftsBusy = true; draftsError = ""; currentDrafts = null;
   renderDrafts();
   try{
-    const r = await api("reply", { intent:intent.id, hint:intent.hint,
-      subject:m.subject, from:m.from, counterpart:m.addr, body:m.body });
-    currentDrafts = r.drafts || [];
+    const sys = baseSystem(m.addr) + "\n" + [
+      "",
+      "これから渡すのは、受け取ったメールの本文である。内容を読み解いた上で返信を書く。",
+      "相手が尋ねている点・依頼している点をすべて拾い、どれにも触れずに終わらせない。",
+      "相手の名前は差出人欄から取り、文体に合った敬称を付ける（親しみ・丁寧は「◯◯さま」、ビジネスは「◯◯様」）。",
+      "返信の方針: " + (intent.hint || "内容に沿って返す"),
+      "",
+      "出力は次の JSON のみ。前置きもコードブロックも付けない。",
+      '{"drafts":[{"tag":"案の性格を4字以内で","text":"本文"},{"tag":"","text":""}]}',
+      "案は2つ。1つ目は素直な返し、2つ目は少し方針を変えたもの。",
+      "各案は署名を除いて8行以内に収める。冗長にしない。"
+    ].join("\n");
+    const usr = [
+      "差出人: " + (m.from || ""),
+      "件名: " + (m.subject || ""),
+      "本文:",
+      String(m.body || "").slice(0, 3000)
+    ].join("\n");
+    const out = await ai(sys, usr);
+    currentDrafts = (out.drafts || []).slice(0,3).map((d,i) =>
+      ({ tag: d.tag || ("案" + (i+1)), text: ensureSig(polish(d.text, m.addr)) }));
     draftsBusy = false; renderDrafts();
     const sc = $("rdScroll");
     if(sc) sc.scrollTo({ top: 0, behavior: "smooth" });
@@ -654,15 +789,47 @@ dkIn.addEventListener("input", autogrow);
 dkIn.addEventListener("keydown", e => { if((e.metaKey||e.ctrlKey) && e.key === "Enter"){ e.preventDefault(); quick(); } });
 $("dkGo").onclick = quick;
 
+// 走り書き → 新規メール
+async function composeFromBrief(brief){
+  const list = (await contacts()).slice(0, 200)
+    .map(c => (c.name ? c.name + " " : "") + "<" + c.addr + ">").join("\n");
+  const sys = baseSystem("") + "\n" + [
+    "",
+    "これから渡すのは、高崎本人が書いた走り書きのメモである。まず内容を読み解いてから、メールに書き直す。",
+    "手順:",
+    "1. 誰に宛てたものかを特定する。連絡先一覧に該当する人がいれば、そのメールアドレスを to に入れる。",
+    "   苗字だけ・呼び名だけでも一覧と照合する。確信が持てなければ to は空にする。推測でアドレスを作らない。",
+    "2. 「CCで◯◯」「◯◯にも共有」「◯◯も入れて」のような書き方があれば、その人は cc に入れる。",
+    "   to と cc を取り違えない。cc の人は本文の宛名には書かない。cc が無ければ空文字にする。",
+    "3. 本文は必ず宛名の行から始める。氏名が分かれば文体に合った敬称を付ける（親しみ・丁寧は「◯◯さま」、ビジネスは「◯◯様」）。",
+    "   氏名が分からなければ会社名や部署名、それも分からなければ「ご担当者さま」（ビジネスのみ「ご担当者様」）とする。",
+    "4. 走り書きの中の事実（日時・場所・人数・期限・条件・代替案）をすべて拾い、ひとつも落とさない。",
+    "5. 用件が一目で分かる件名を20字前後で付ける。",
+    "6. 走り書きの語順や口調は捨て、指定の文体で整った本文に書き直す。",
+    "",
+    "連絡先一覧:",
+    list || "（まだありません）",
+    "",
+    "出力は次の JSON のみ。前置きもコードブロックも付けない。",
+    '{"to":"","cc":"","subject":"","body":"","note":""}',
+    "note には、走り書きから読み取れず補えなかった点があれば一言で書く。無ければ空文字。"
+  ].join("\n");
+  const out = await ai(sys, "走り書き:\n" + brief);
+  return {
+    to: out.to || "", cc: out.cc || "", subject: out.subject || "", note: out.note || "",
+    body: ensureSig(polish(out.body, out.to || ""))
+  };
+}
+
 async function quick(){
   const brief = dkIn.value.trim();
   if(!brief){ dkIn.focus(); return; }
   $("dkGo").disabled = true;
   $("dkHint").textContent = "「" + L().name + "」で組み立てています…";
   try{
-    const r = await api("quick", { brief });
+    const r = await composeFromBrief(brief);
     openCompose({ to:r.to||"", cc:r.cc||"", subject:r.subject||"",
-      body:(r.drafts&&r.drafts[0]?r.drafts[0].text:""), title:"新規メッセージ", source:{ kind:"quick", brief } });
+      body:r.body||"", title:"新規メッセージ", source:{ kind:"quick", brief } });
     dkIn.value = ""; autogrow();
     $("dkHint").textContent = r.note ? r.note : (r.to ? "" : "宛先が特定できませんでした。作成画面で入れてください。");
   }catch(e){
@@ -722,20 +889,21 @@ $("cpRedo").onclick = redo;
 async function redo(){
   $("cpHint").textContent = "「" + L().name + "」で書き直しています…";
   try{
-    let r;
+    let text = "";
     if(composeSource && composeSource.kind === "reply"){
       const m = composeSource.msg;
-      r = await api("reply", { intent:composeSource.intent, hint:composeSource.hint,
-        subject:m.subject, from:m.from, counterpart:m.addr, body:m.body });
+      await generate(lastIntent || { id:"ok", label:"了解する", hint:composeSource.hint });
+      text = (currentDrafts && currentDrafts[0]) ? currentDrafts[0].text : "";
     }else{
       const brief = (composeSource && composeSource.brief) || $("cpBody").value.trim() || $("cpSubj").value.trim();
       if(!brief){ $("cpHint").textContent = "先に本文か件名を入れてください"; return; }
-      r = await api("quick", { brief });
+      const r = await composeFromBrief(brief);
       if(r.subject) $("cpSubj").value = r.subject;
       if(r.to && !$("cpTo").value) $("cpTo").value = r.to;
+      text = r.body;
     }
-    if(r.drafts && r.drafts[0]){
-      const t = ensureSig(r.drafts[0].text);
+    if(text){
+      const t = ensureSig(text);
       $("cpBody").value = t; lastGenerated = t;
     }
     $("cpHint").textContent = "文体：" + L().name;
@@ -747,7 +915,7 @@ $("cpSend").onclick = async () => {
   $("cpHint").textContent = "送信中…";
   try{
     const r = await api("send", { threadId:composeThread, all:composeAll, to:$("cpTo").value,
-      cc:$("cpCc").value, subject:$("cpSubj").value, body:$("cpBody").value });
+      cc:$("cpCc").value, subject:$("cpSubj").value, body:$("cpBody").value, signature:SIGNATURE });
     closeCompose();
     banner("送信しました" + (r.from ? "（差出人: " + r.from + "）" : ""));
     setTimeout(() => banner(""), 4000);
