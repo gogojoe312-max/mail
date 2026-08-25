@@ -312,7 +312,7 @@ const LEVELS = {
 const LEVEL_ORDER = ["weak","mid","strong"];
 
 /* ---------- 保存 ---------- */
-const KEY = "mailai.v1", SCHEMA = 4;
+const KEY = "mailai.v1", SCHEMA = 5;
 const store = (() => {
   let ok = false;
   try { localStorage.setItem("_t","1"); localStorage.removeItem("_t"); ok = true; } catch(e){}
@@ -347,6 +347,7 @@ function migrate(raw){
   }
   if(v < 3){ d.endpoint = d.endpoint || ""; d.token = d.token || ""; }
   if(v < 4){ if(!Array.isArray(d.terms)) d.terms = DEFAULT_TERMS.slice(); }
+  if(v < 5){ d.fast = !!d.fast; }
   d.schema = SCHEMA;
   if(!Array.isArray(d.intents) || !d.intents.length) d.intents = DEFAULT_INTENTS.slice();
   if(!LEVELS[d.level]) d.level = "mid";
@@ -354,7 +355,7 @@ function migrate(raw){
 }
 
 let settings = migrate(store.get(KEY)) || {
-  schema: SCHEMA, level:"mid", memo:"", endpoint:"", token:"",
+  schema: SCHEMA, level:"mid", memo:"", endpoint:"", token:"", fast:false,
   terms: DEFAULT_TERMS.slice(), intents: DEFAULT_INTENTS.slice()
 };
 
@@ -376,7 +377,7 @@ async function api(action, payload = {}){
     headers:{ "Content-Type":"text/plain;charset=utf-8" },
     body: JSON.stringify(Object.assign({
       action, token: settings.token, level: settings.level,
-      memo: settings.memo || "", terms: settings.terms || []
+      memo: settings.memo || "", terms: settings.terms || [], fast: !!settings.fast
     }, payload))
   });
   if(!res.ok) throw new Error("ウェブアプリが応答しません（" + res.status + "）");
@@ -771,6 +772,11 @@ function renderSheet(){
       <div class="d">受信箱 ${esc(VIA)}／送信元 ${esc(ACCOUNT)}</div></div>
       <button class="sh-btn" id="btnTest">確かめる</button></div>
 
+    <div class="sh-sec">生成の速さ</div>
+    <div class="sh-row"><div class="k"><div class="n">${settings.fast ? "速さ優先" : "品質優先"}</div>
+      <div class="d">速さ優先にすると軽いモデルに切り替わり、返信案が出るまでの時間が短くなります。文面の練り込みは落ちます。</div></div>
+      <button class="sh-btn" id="btnFast">${settings.fast ? "品質優先に戻す" : "速さ優先にする"}</button></div>
+
     <div class="sh-sec">文体</div>
     <div class="sh-row"><div class="k"><div class="n">いま：${esc(lv.name)}（${esc(lv.note)}）</div>
       <div class="d">親しみ＝砕けた調子、！も可／丁寧＝硬すぎない自然な文面／ビジネス＝最も改まった文面で名乗りも入る。
@@ -812,6 +818,7 @@ function renderSheet(){
   const rerender = () => { flush(); renderSheet(); };
   $("inEp").oninput = e => { settings.endpoint = e.target.value.trim(); save(); };
   $("inTk").oninput = e => { settings.token = e.target.value.trim(); save(); };
+  $("btnFast").onclick = () => { settings.fast = !settings.fast; flush(); renderSheet(); };
   $("inMemo").oninput = e => { settings.memo = e.target.value; save(); };
   $("btnTest").onclick = async () => {
     flush(); $("shStatus").textContent = "確かめています…";
