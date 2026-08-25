@@ -320,7 +320,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "2026-08-26 08:45";   // 設定の一番下に出る。読み込まれているファイルの確認用。
+const BUILD = "2026-08-26 08:55";   // 設定の一番下に出る。読み込まれているファイルの確認用。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -1198,7 +1198,8 @@ function renderSheet(){
       <div class="d">Apps Script のスクリプトプロパティ APP_TOKEN と同じ文字列</div>
       <input class="sh-in" id="inTk" value="${esc(settings.token)}" style="margin-top:7px"></div></div>
     <div class="sh-row"><div class="k"><div class="n">${connected()?"接続済み":"未接続"}</div>
-      <div class="d">受信箱 ${esc(VIA)}／送信元 ${esc(ACCOUNT)}</div></div>
+      <div class="d">受信箱 ${esc(VIA)}／送信元 ${esc(ACCOUNT)}
+URLの末尾: ${esc((settings.endpoint||"").slice(-20) || "（未入力）")}（正しくは …SGFgjIWUJH3Ig/exec）</div></div>
       <button class="sh-btn" id="btnTest">確かめる</button></div>
 
     <div class="sh-sec">生成の速さ</div>
