@@ -1,11 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
-  <style>
-    .stroke { stroke: #1c1d21; }
-    @media (prefers-color-scheme: dark) { .stroke { stroke: #ffffff; } }
-  </style>
-  <g class="stroke" fill="none" stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round">
-    <rect x="8" y="15" width="48" height="34" rx="5"/>
-    <path d="M10.5 18 32 35.5 53.5 18"/>
+  <rect x="0" y="0" width="64" height="64" rx="14" fill="#1f2125"/>
+  <g fill="none" stroke="#ffffff" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="12" y="19" width="40" height="27" rx="4.5"/>
+    <path d="M14.2 21.6 32 36 49.8 21.6"/>
   </g>
-  <circle cx="54" cy="14" r="7.5" fill="#0a84ff"/>
 </svg>
