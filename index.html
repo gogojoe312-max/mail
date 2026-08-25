@@ -639,7 +639,8 @@ async function load(){
     if(!query) store.set(key, JSON.stringify(threads));
     banner(connected() ? "" : "ウェブアプリが未接続です。設定からURLと合言葉を入れてください。（いまは見本を表示しています）");
   }catch(e){
-    if(!threads.length) banner("受信できませんでした。" + e.message);
+    // 失敗を黙って飲み込むと一覧が古いまま凍る。必ず出す。
+    banner("受信できませんでした。" + e.message);
   }finally{
     loading = false; renderSidebar(); renderList();
     if(!currentId) renderReader();
