@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="メール">
@@ -44,7 +44,12 @@ addEventListener("unhandledrejection", function(e){
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{height:100%;margin:0}
 @supports (height:100dvh){html,body{height:100dvh}}
-body{font-family:var(--font);font-size:13px;color:var(--text);background:var(--pane-bg);overflow:hidden;-webkit-font-smoothing:antialiased}
+body{font-family:var(--font);font-size:13px;color:var(--text);background:var(--pane-bg);overflow:hidden;
+  -webkit-font-smoothing:antialiased;touch-action:manipulation;-webkit-text-size-adjust:100%;text-size-adjust:100%}
+/* iOS は 16px 未満の入力欄に触れると自動でズームする。タッチ端末では 16px に上げて止める。 */
+@media (hover:none){
+  input,textarea,select{font-size:16px !important}
+}
 button{font-family:inherit;font-size:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
 input,textarea{font-family:inherit;font-size:inherit;color:inherit}
 :focus-visible{outline:2px solid var(--accent);outline-offset:1px;border-radius:4px}
@@ -663,12 +668,21 @@ async function quick(){
 
 /* ---------- 作成 ---------- */
 let composeSource = null, composeThread = null, composeAll = false;
+
+// 署名が無い本文には必ず付ける。
+function ensureSig(body){
+  const b = String(body || "").replace(/\s+$/, "");
+  if(b.indexOf("j-takasaki@ufg.co.jp") !== -1 && b.indexOf("UP-FRONT WORKS") !== -1) return b;
+  return b + "\n\n" + SIGNATURE;
+}
 function openCompose(o = {}){
   composeSource = o.source || null; composeThread = o.threadId || null; composeAll = !!o.all;
   $("cpTitle").textContent = o.title || "新規メッセージ";
   $("cpTo").value = o.to || ""; $("cpCc").value = o.cc || "";
-  $("cpSubj").value = o.subject || ""; $("cpBody").value = o.body || "";
-  lastGenerated = o.body || "";
+  $("cpSubj").value = o.subject || "";
+  const withSig = ensureSig(o.body || "");
+  $("cpBody").value = withSig;
+  lastGenerated = withSig;
   $("cpHint").textContent = ""; renderSeg($("cpSeg"));
   $("compose").classList.add("on"); $("scrim").classList.add("on");
   ($(o.body ? "cpBody" : "cpTo")).focus();
@@ -716,7 +730,10 @@ async function redo(){
       if(r.subject) $("cpSubj").value = r.subject;
       if(r.to && !$("cpTo").value) $("cpTo").value = r.to;
     }
-    if(r.drafts && r.drafts[0]){ $("cpBody").value = r.drafts[0].text; lastGenerated = r.drafts[0].text; }
+    if(r.drafts && r.drafts[0]){
+      const t = ensureSig(r.drafts[0].text);
+      $("cpBody").value = t; lastGenerated = t;
+    }
     $("cpHint").textContent = "文体：" + L().name;
   }catch(e){ $("cpHint").textContent = e.message; }
 }
