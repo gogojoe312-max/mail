@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="メール">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#f6f6f6">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>メール</title>
+<style>
+:root{
+  --accent:#007aff;--accent-press:#0062cc;--sidebar-bg:#f0eff2;--pane-bg:#ffffff;
+  --toolbar-bg:#f6f6f6;--hairline:rgba(0,0,0,.10);--hairline-soft:rgba(0,0,0,.06);
+  --fill:rgba(0,0,0,.055);--text:#000;--text-2:rgba(0,0,0,.55);--text-3:rgba(0,0,0,.38);
+  --sel-inactive:rgba(0,0,0,.075);--seg-on:#fff;--row-h:74px;--sidebar-w:212px;--list-w:340px;
+  --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic",system-ui,sans-serif;
+}
+@media (prefers-color-scheme:dark){:root{
+  --accent:#0a84ff;--accent-press:#3d9bff;--sidebar-bg:#26262a;--pane-bg:#1e1e1e;--toolbar-bg:#2c2c2e;
+  --hairline:rgba(255,255,255,.14);--hairline-soft:rgba(255,255,255,.08);--fill:rgba(255,255,255,.09);
+  --text:#fff;--text-2:rgba(255,255,255,.6);--text-3:rgba(255,255,255,.4);
+  --sel-inactive:rgba(255,255,255,.10);--seg-on:#5a5a5f;}}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;margin:0}
+body{font-family:var(--font);font-size:13px;color:var(--text);background:var(--pane-bg);overflow:hidden;-webkit-font-smoothing:antialiased}
+button{font-family:inherit;font-size:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+input,textarea{font-family:inherit;font-size:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:1px;border-radius:4px}
+.icon{width:16px;height:16px;flex:0 0 auto;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+#shell{display:flex;flex-direction:column;height:100%}
+#app{flex:1;min-height:0;display:flex}
+
+#sidebar{width:var(--sidebar-w);flex:0 0 auto;background:var(--sidebar-bg);border-right:1px solid var(--hairline);display:flex;flex-direction:column;padding-top:env(safe-area-inset-top)}
+.sb-top{height:52px;flex:0 0 auto;display:flex;align-items:center;padding:0 14px}
+.sb-title{font-size:13px;font-weight:700}
+.sb-scroll{flex:1;overflow-y:auto;padding:2px 8px 14px}
+.sb-head{font-size:11px;font-weight:600;color:var(--text-3);padding:12px 8px 4px;word-break:break-all}
+.sb-item{display:flex;align-items:center;gap:8px;width:100%;height:26px;padding:0 8px;border-radius:6px;text-align:left}
+.sb-item .icon{color:var(--accent);width:15px;height:15px}
+.sb-item .lbl{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sb-item .cnt{font-size:12px;color:var(--text-3);font-variant-numeric:tabular-nums}
+.sb-item:hover{background:var(--hairline-soft)}
+.sb-item[aria-current="true"]{background:var(--sel-inactive);font-weight:600}
+
+#list{width:var(--list-w);flex:0 0 auto;background:var(--pane-bg);border-right:1px solid var(--hairline);display:flex;flex-direction:column}
+.pane-top{height:52px;flex:0 0 auto;display:flex;align-items:center;gap:6px;padding:0 10px 0 12px;background:var(--toolbar-bg);border-bottom:1px solid var(--hairline);padding-top:env(safe-area-inset-top)}
+.tb-btn{width:30px;height:26px;border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--text-2)}
+.tb-btn:hover{background:var(--hairline-soft);color:var(--text)}
+.tb-btn[disabled]{opacity:.3;cursor:default;background:none}
+.tb-spacer{flex:1}
+.search{display:flex;align-items:center;gap:5px;flex:1;height:24px;padding:0 7px;border-radius:6px;background:var(--fill);color:var(--text-2)}
+.search input{flex:1;border:0;background:none;outline:none;font-size:12px;min-width:0}
+.search .icon{width:13px;height:13px}
+.list-scroll{flex:1;overflow-y:auto;overscroll-behavior:contain}
+.row{display:grid;grid-template-columns:14px 1fr;width:100%;min-height:var(--row-h);padding:9px 14px 10px 6px;border-bottom:1px solid var(--hairline-soft);text-align:left;align-items:start}
+.row .dot{width:8px;height:8px;border-radius:50%;background:var(--accent);margin:5px 0 0 3px;visibility:hidden}
+.row.unread .dot{visibility:visible}
+.row .r1{display:flex;align-items:baseline;gap:8px}
+.row .from{font-size:13px;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row.unread .from{font-weight:700}
+.row .date{font-size:11px;color:var(--text-3);flex:0 0 auto;font-variant-numeric:tabular-nums}
+.row .subj{font-size:13px;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block}
+.row .prev{font-size:12px;color:var(--text-2);margin-top:2px;line-height:1.42;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.row:hover{background:var(--hairline-soft)}
+.row[aria-selected="true"],.row[aria-selected="true"]:hover{background:var(--accent)}
+.row[aria-selected="true"] .from,.row[aria-selected="true"] .subj{color:#fff}
+.row[aria-selected="true"] .date,.row[aria-selected="true"] .prev{color:rgba(255,255,255,.82)}
+.row[aria-selected="true"] .dot{background:#fff}
+
+#reader{flex:1;min-width:0;display:flex;flex-direction:column;background:var(--pane-bg)}
+.rd-scroll{flex:1;overflow-y:auto;padding-bottom:8px}
+.rd-head{padding:20px 28px 14px;border-bottom:1px solid var(--hairline-soft)}
+.rd-subj{font-size:17px;font-weight:700;line-height:1.35;letter-spacing:-.01em}
+.rd-meta{display:flex;align-items:center;gap:10px;margin-top:14px}
+.avatar{width:34px;height:34px;border-radius:50%;flex:0 0 auto;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600}
+.rd-who{flex:1;min-width:0}
+.rd-name{font-size:13px;font-weight:600}
+.rd-to{font-size:12px;color:var(--text-2);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rd-date{font-size:12px;color:var(--text-2);flex:0 0 auto;white-space:nowrap}
+.rd-body{padding:20px 28px;font-size:13.5px;line-height:1.72;white-space:pre-wrap;word-break:break-word;max-width:760px}
+.rd-sep{margin:0 28px;border-top:1px dashed var(--hairline);padding-top:4px}
+
+.ai-bar{flex:0 0 auto;border-top:1px solid var(--hairline);background:var(--toolbar-bg);padding:11px 20px 13px}
+.ai-lbl{font-size:11px;font-weight:600;color:var(--text-3);margin-bottom:8px}
+.chips{display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+.chip{height:27px;padding:0 12px;border-radius:14px;background:var(--pane-bg);border:1px solid var(--hairline);font-size:12px;font-weight:500;white-space:nowrap;display:flex;align-items:center;gap:5px}
+.chip:hover{background:var(--hairline-soft)}
+.chip.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.chip.primary:hover{background:var(--accent-press)}
+.chip .icon{width:13px;height:13px}
+.drafts{padding:4px 28px 20px;max-width:760px}
+.draft{border:1px solid var(--hairline);border-radius:10px;padding:13px 15px;margin-bottom:9px}
+.draft-h{display:flex;align-items:center;gap:8px;margin-bottom:7px}
+.draft-tag{font-size:10.5px;font-weight:700;color:var(--accent);border:1px solid currentColor;border-radius:4px;padding:1px 5px}
+.draft-use{font-size:12px;font-weight:600;color:var(--accent)}
+.draft-body{font-size:13px;line-height:1.68;white-space:pre-wrap}
+.thinking{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text-2);padding:6px 0}
+.spin{width:13px;height:13px;border-radius:50%;flex:0 0 auto;border:1.8px solid var(--hairline);border-top-color:var(--accent);animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation-duration:2.4s}}
+.empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;color:var(--text-3);padding:40px;text-align:center}
+.empty .icon{width:38px;height:38px;stroke-width:1.1}
+.empty .t{font-size:15px;color:var(--text-2);font-weight:500}
+.empty .s{font-size:12.5px;max-width:300px;line-height:1.6}
+
+#dock{flex:0 0 auto;background:var(--toolbar-bg);border-top:1px solid var(--hairline);padding:9px 16px calc(11px + env(safe-area-inset-bottom))}
+.dk-head{display:flex;align-items:center;gap:10px;margin-bottom:7px}
+.dk-title{font-size:11px;font-weight:600;color:var(--text-3);flex:1}
+.dk-lvl-lbl{font-size:11px;font-weight:600;color:var(--text-3)}
+.seg{display:flex;background:var(--fill);border-radius:7px;padding:2px;gap:2px}
+.seg button{height:22px;min-width:34px;padding:0 10px;border-radius:5px;font-size:12px;font-weight:500;color:var(--text-2)}
+.seg button[aria-pressed="true"]{background:var(--seg-on);color:var(--text);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.14),0 0 0 .5px rgba(0,0,0,.06)}
+.dk-row{display:flex;align-items:flex-end;gap:8px}
+.dk-in{flex:1;min-width:0;resize:none;border:1px solid var(--hairline);border-radius:9px;background:var(--pane-bg);padding:8px 11px;font-size:13px;line-height:1.6;min-height:38px;max-height:132px;outline:none}
+.dk-in:focus{border-color:var(--accent)}
+.dk-go{height:38px;padding:0 16px;border-radius:9px;background:var(--accent);color:#fff;font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px;flex:0 0 auto}
+.dk-go:hover{background:var(--accent-press)}
+.dk-go[disabled]{opacity:.45;cursor:default}
+.dk-hint{font-size:11px;color:var(--text-3);margin-top:6px;line-height:1.5}
+
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.16);display:none;z-index:40}
+.scrim.on{display:block}
+.compose,.sheet{position:fixed;z-index:50;display:none;flex-direction:column;left:50%;top:50%;transform:translate(-50%,-50%);background:var(--pane-bg);border-radius:11px;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,.28),0 0 0 .5px rgba(0,0,0,.16)}
+.compose{width:min(680px,calc(100vw - 28px));height:min(600px,calc(100vh - 60px))}
+.sheet{width:min(560px,calc(100vw - 28px));max-height:min(640px,calc(100vh - 60px))}
+.compose.on,.sheet.on{display:flex}
+.cp-top{height:48px;flex:0 0 auto;display:flex;align-items:center;gap:6px;padding:0 12px;background:var(--toolbar-bg);border-bottom:1px solid var(--hairline)}
+.cp-title{flex:1;text-align:center;font-size:12.5px;font-weight:600;color:var(--text-2)}
+.cp-send{width:30px;height:26px;border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--accent)}
+.cp-send:hover{background:var(--hairline-soft)}
+.cp-field{display:flex;align-items:center;gap:8px;padding:0 16px;height:34px;border-bottom:1px solid var(--hairline-soft)}
+.cp-field .k{width:44px;flex:0 0 auto;font-size:12.5px;color:var(--text-2)}
+.cp-field input{flex:1;border:0;outline:none;background:none;font-size:13px;min-width:0}
+.cp-body{flex:1;border:0;outline:none;resize:none;padding:16px;font-size:13.5px;line-height:1.72;background:none}
+.cp-foot{flex:0 0 auto;border-top:1px solid var(--hairline);background:var(--toolbar-bg);padding:9px 14px;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.cp-hint{font-size:11px;color:var(--text-3)}
+.sh-scroll{overflow-y:auto;padding:6px 20px 20px}
+.sh-sec{font-size:11px;font-weight:600;color:var(--text-3);margin:18px 0 7px}
+.sh-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--hairline-soft)}
+.sh-row .k{flex:1;min-width:0}
+.sh-row .k .n{font-size:13px;font-weight:500}
+.sh-row .k .d{font-size:12px;color:var(--text-2);margin-top:2px;line-height:1.55;white-space:pre-wrap}
+.sh-in{width:100%;padding:6px 9px;border:1px solid var(--hairline);border-radius:6px;background:none;outline:none;font-size:12.5px;line-height:1.6}
+.sh-in:focus{border-color:var(--accent)}
+.sh-btn{height:26px;padding:0 12px;border-radius:6px;border:1px solid var(--hairline);font-size:12px;font-weight:500;white-space:nowrap}
+.sh-btn:hover{background:var(--hairline-soft)}
+.sh-btn.danger{color:#d70015;border-color:rgba(215,0,21,.35)}
+.sh-btn.danger.armed{background:#d70015;border-color:#d70015;color:#fff}
+.status{font-size:12px;color:var(--text-2);padding:8px 0 0;line-height:1.55}
+.sig-box{margin-top:7px;padding:10px 12px;border:1px solid var(--hairline);border-radius:8px;background:var(--fill);font-size:12.5px;line-height:1.7;white-space:pre-wrap}
+.banner{padding:7px 16px;font-size:12px;background:#fff4d6;color:#6b4e00;border-bottom:1px solid var(--hairline);display:none}
+.banner.on{display:block}
+@media (prefers-color-scheme:dark){.banner{background:#3a2f10;color:#f0d78a}}
+.back-btn{display:none}
+@media (max-width:860px){
+  #sidebar{display:none}
+  #list{width:100%;border-right:0}
+  #reader{display:none}
+  body.reading #list{display:none}
+  body.reading #reader{display:flex}
+  .back-btn{display:flex}
+  .rd-head,.rd-body,.drafts{padding-left:18px;padding-right:18px}
+  .rd-sep{margin:0 18px}
+  .ai-bar,#dock{padding-left:13px;padding-right:13px}
+}
+</style>
+</head>
+<body>
+
+<div id="shell">
+<div class="banner" id="banner"></div>
+<div id="app">
+  <nav id="sidebar">
+    <div class="sb-top"><span class="sb-title">メール</span></div>
+    <div class="sb-scroll" id="sbScroll"></div>
+  </nav>
+
+  <section id="list">
+    <div class="pane-top">
+      <button class="tb-btn" id="btnRefresh" title="受信" aria-label="受信">
+        <svg class="icon" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 5v6h-6"/></svg>
+      </button>
+      <div class="search">
+        <svg class="icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="q" type="search" placeholder="検索" aria-label="メールを検索">
+      </div>
+      <button class="tb-btn" id="btnSettings" title="設定" aria-label="設定">
+        <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1v.2a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-2.8-1.1l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.6 1.6 0 0 0 3.5 15H3.3a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 4.6 8.3l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 2.7-1.1V4.2a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 2.8 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0 1.1 2.7h.2a2 2 0 1 1 0 4h-.2z"/></svg>
+      </button>
+    </div>
+    <div class="list-scroll" id="listScroll" role="listbox" aria-label="メッセージ一覧"></div>
+  </section>
+
+  <section id="reader">
+    <div class="pane-top">
+      <button class="tb-btn back-btn" id="btnBack" aria-label="一覧へ戻る">
+        <svg class="icon" viewBox="0 0 24 24"><path d="m14 6-6 6 6 6"/></svg>
+      </button>
+      <button class="tb-btn" id="btnReply" title="返信" aria-label="返信">
+        <svg class="icon" viewBox="0 0 24 24"><path d="M9 7 4 12l5 5"/><path d="M4 12h9a7 7 0 0 1 7 7v1"/></svg>
+      </button>
+      <button class="tb-btn" id="btnArchive" title="アーカイブ" aria-label="アーカイブ">
+        <svg class="icon" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg>
+      </button>
+      <div class="tb-spacer"></div>
+    </div>
+    <div class="rd-scroll" id="rdScroll"></div>
+    <div class="ai-bar" id="aiBar" hidden>
+      <div class="ai-lbl">返信案をつくる</div>
+      <div class="chips" id="chips"></div>
+    </div>
+  </section>
+</div>
+
+<div id="dock">
+  <div class="dk-head">
+    <span class="dk-title">宛先と用件を書くと、読み取って新規メールにします</span>
+    <span class="dk-lvl-lbl">敬語</span>
+    <div class="seg" id="seg" role="group" aria-label="敬語の強さ"></div>
+  </div>
+  <div class="dk-row">
+    <textarea class="dk-in" id="dkIn" rows="1"
+      placeholder="例）佐野さんに、来週火曜のAスタを13時から6時間で押さえてほしい。人数は4名。木曜でも可。"></textarea>
+    <button class="dk-go" id="dkGo">
+      <svg class="icon" viewBox="0 0 24 24" style="stroke-width:1.5"><path d="M12 3.5 13.6 9 19 10.6 13.6 12.2 12 17.7 10.4 12.2 5 10.6 10.4 9z"/></svg>
+      作成
+    </button>
+  </div>
+  <div class="dk-hint" id="dkHint"></div>
+</div>
+</div>
+
+<div class="scrim" id="scrim"></div>
+
+<div class="compose" id="compose" role="dialog" aria-modal="true" aria-label="メッセージ">
+  <div class="cp-top">
+    <button class="tb-btn" id="cpClose" aria-label="閉じる"><svg class="icon" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+    <div class="cp-title" id="cpTitle">新規メッセージ</div>
+    <button class="cp-send" id="cpSend" title="送信" aria-label="送信"><svg class="icon" viewBox="0 0 24 24" style="stroke-width:1.5"><path d="M4 12h15"/><path d="m13 6 6 6-6 6"/></svg></button>
+  </div>
+  <div class="cp-field"><span class="k">宛先</span><input id="cpTo" autocomplete="off" inputmode="email"></div>
+  <div class="cp-field"><span class="k">Cc</span><input id="cpCc" autocomplete="off" inputmode="email"></div>
+  <div class="cp-field"><span class="k">件名</span><input id="cpSubj" autocomplete="off"></div>
+  <textarea class="cp-body" id="cpBody" placeholder="本文"></textarea>
+  <div class="cp-foot">
+    <span class="cp-hint">敬語</span>
+    <div class="seg" id="cpSeg" role="group" aria-label="敬語の強さ"></div>
+    <button class="chip" id="cpRedo">この文体で書き直す</button>
+    <span class="cp-hint" id="cpHint"></span>
+  </div>
+</div>
+
+<div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-label="設定">
+  <div class="cp-top">
+    <div class="tb-btn" style="visibility:hidden"></div>
+    <div class="cp-title">設定</div>
+    <button class="tb-btn" id="shClose" aria-label="閉じる"><svg class="icon" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+  </div>
+  <div class="sh-scroll" id="shScroll"></div>
+</div>
+
+<script>
+"use strict";
+
+/* 署名 — 実際に付くのは裏側（Code.gs）の SIGNATURE。ここは表示用の控え。 */
+const SIGNATURE = [
+  "――――――――――――――――",
+  "株式会社アップフロントワークス",
+  "Music Director　高崎 晟",
+  "j-takasaki@ufg.co.jp"
+].join("\n");
+
+const ACCOUNT = "j-takasaki@ufg.co.jp";
+const VIA     = "j-takasaki@bu.k-cloud90.biz";
+
+/* ---------- 敬語 ---------- */
+const LEVELS = {
+  weak:  { name:"弱", note:"社内・気心の知れた相手" },
+  mid:   { name:"中", note:"通常の社外・取引先" },
+  strong:{ name:"強", note:"初対面・目上・改まった場面" }
+};
+const LEVEL_ORDER = ["weak","mid","strong"];
+
+/* ---------- 保存 ---------- */
+const KEY = "mailai.v1", SCHEMA = 3;
+const store = (() => {
+  let ok = false;
+  try { localStorage.setItem("_t","1"); localStorage.removeItem("_t"); ok = true; } catch(e){}
+  const mem = {};
+  return { persistent: ok,
+    get(k){ try { return ok ? localStorage.getItem(k) : (mem[k] ?? null); } catch(e){ return mem[k] ?? null; } },
+    set(k,v){ try { ok ? localStorage.setItem(k,v) : (mem[k]=v); } catch(e){ mem[k]=v; } } };
+})();
+
+const DEFAULT_INTENTS = [
+  { id:"ok",       label:"了解する",   hint:"内容を受けて承諾する" },
+  { id:"schedule", label:"日程を返す", hint:"こちらの都合を示して日程を決めにいく" },
+  { id:"decline",  label:"やんわり断る", hint:"角を立てずに辞退し、可能なら代案を添える" },
+  { id:"ask",      label:"確認する",   hint:"不明点を箇条書きで質問する" },
+  { id:"thanks",   label:"お礼",       hint:"短くお礼を述べて締める" }
+];
+
+function migrate(raw){
+  if(!raw) return null;
+  let d; try { d = JSON.parse(raw); } catch(e){ return null; }
+  if(!d || typeof d !== "object") return null;
+  const v = d.schema || 1;
+  if(v < 2){
+    d.level = d.level || "mid";
+    if(d.tone && !d.memo) d.memo = d.tone;
+    delete d.tone; delete d.signature;
+  }
+  if(v < 3){ d.endpoint = d.endpoint || ""; d.token = d.token || ""; }
+  d.schema = SCHEMA;
+  if(!Array.isArray(d.intents) || !d.intents.length) d.intents = DEFAULT_INTENTS.slice();
+  if(!LEVELS[d.level]) d.level = "mid";
+  return d;
+}
+
+let settings = migrate(store.get(KEY)) || {
+  schema: SCHEMA, level:"mid", memo:"", endpoint:"", token:"", intents: DEFAULT_INTENTS.slice()
+};
+
+let saveTimer = null;
+const save  = () => { clearTimeout(saveTimer); saveTimer = setTimeout(flush, 400); };
+const flush = () => { clearTimeout(saveTimer); settings.schema = SCHEMA; store.set(KEY, JSON.stringify(settings)); };
+addEventListener("pagehide", flush);
+addEventListener("beforeunload", flush);
+document.addEventListener("visibilitychange", () => { if(document.hidden) flush(); });
+
+const L = () => LEVELS[settings.level];
+const connected = () => !!(settings.endpoint && settings.token);
+
+/* ---------- 裏側呼び出し ---------- */
+async function api(action, payload = {}){
+  if(!connected()) { await new Promise(r=>setTimeout(r,600)); return demo(action, payload); }
+  const res = await fetch(settings.endpoint, {
+    method:"POST",
+    headers:{ "Content-Type":"text/plain;charset=utf-8" },
+    body: JSON.stringify(Object.assign({
+      action, token: settings.token, level: settings.level, memo: settings.memo || ""
+    }, payload))
+  });
+  if(!res.ok) throw new Error("ウェブアプリが応答しません（" + res.status + "）");
+  const data = await res.json();
+  if(data.error) throw new Error(data.error);
+  return data;
+}
+
+/* ---------- 未接続のときの見本 ---------- */
+const DEMO_THREADS = [
+  { id:"d1", unread:true,  from:"制作部 佐野", addr:"sano@example.co.jp", to:"高崎 晟", date:"9:12",
+    subject:"来週のレコーディング枠について",
+    body:"高崎さん\n\nお疲れさまです。来週のボーカル録りですが、Aスタが火曜と木曜で空いています。\nどちらか押さえたいので、ご都合を教えてください。\n\n人数は4名、1人あたり2時間ほどを見込んでいます。\n\n佐野" },
+  { id:"d2", unread:true,  from:"作詞 中村", addr:"nakamura@example.jp", to:"高崎 晟", date:"昨日",
+    subject:"歌詞、初稿をお送りします",
+    body:"高崎様\n\nお世話になっております。中村です。\n初稿ができましたので、添付にてお送りいたします。\nサビの譜割りが仮のままですので、詰めたい箇所があればご遠慮なくお申し付けください。\n\n中村" },
+  { id:"d3", unread:false, from:"宣伝部 高木", addr:"takagi@example.co.jp", to:"高崎 晟", date:"昨日",
+    subject:"クレジット表記の確認（初校）",
+    body:"高崎さん\n\nお疲れさまです。ブックレットの初校が出ました。\nエンジニア表記とミックス表記が入れ違っているように見えます。\n正しい並びを一度いただけますか。校了は金曜です。\n\n高木" }
+];
+function demo(action, p){
+  if(action === "threads") return { box:p.box||"INBOX", threads: DEMO_THREADS.map(t => Object.assign({}, t)) };
+  if(action === "thread"){
+    const t = DEMO_THREADS.find(x => x.id === p.id) || DEMO_THREADS[0];
+    return { id:t.id, subject:t.subject, messages:[{ id:t.id, from:t.from, addr:t.addr, to:t.to, date:t.date, subject:t.subject, body:t.body }] };
+  }
+  if(action === "read" || action === "archive") return { ok:true };
+  const note = "（未接続のため見本です。設定でウェブアプリをつなぐと、実際に読み取って書き分けます）";
+  if(action === "quick")
+    return { to:"", subject:"（未接続）", note:"ウェブアプリが未接続です",
+      drafts:[{ tag:"見本", text:"お世話になっております。\n株式会社アップフロントワークスの高崎です。\n\n" + (p.brief||"") + "\n\n" + note + "\n\nよろしくお願いいたします。\n\n" + SIGNATURE }] };
+  if(action === "reply")
+    return { drafts:[{ tag:"見本", text:"お世話になっております。\n株式会社アップフロントワークスの高崎です。\n\n" + note + "\n\nよろしくお願いいたします。\n\n" + SIGNATURE }] };
+  if(action === "send") throw new Error("ウェブアプリが未接続です");
+  return {};
+}
+
+/* ---------- 状態 ---------- */
+const MAILBOXES = [
+  { id:"INBOX", name:"受信", icon:"tray" }, { id:"SENT", name:"送信済み", icon:"send" },
+  { id:"DRAFTS", name:"下書き", icon:"doc" }, { id:"ARCHIVE", name:"アーカイブ", icon:"box" },
+  { id:"TRASH", name:"ゴミ箱", icon:"trash" }
+];
+let threads = [], currentBox = "INBOX", currentId = null, current = null, query = "", loading = false;
+
+/* ---------- 部品 ---------- */
+const ICONS = {
+  tray:'<path d="M4 13h4l1.5 3h5L16 13h4"/><path d="M4 13 6.5 5h11L20 13v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/>',
+  send:'<path d="M21 3 10.5 13.5"/><path d="M21 3 14.5 21 10.5 13.5 3 9.5z"/>',
+  doc:'<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>',
+  box:'<rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>',
+  trash:'<path d="M4 7h16"/><path d="M9 7V5h6v2"/><path d="M6 7v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7"/>'
+};
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const $ = id => document.getElementById(id);
+const banner = t => { const b = $("banner"); b.textContent = t || ""; b.classList.toggle("on", !!t); };
+
+function renderSeg(el){
+  el.innerHTML = LEVEL_ORDER.map(k =>
+    `<button data-lv="${k}" aria-pressed="${settings.level===k}" title="${esc(LEVELS[k].note)}">${LEVELS[k].name}</button>`).join("");
+  el.querySelectorAll("[data-lv]").forEach(b => b.onclick = () => {
+    settings.level = b.dataset.lv; flush();
+    renderSeg($("seg")); renderSeg($("cpSeg"));
+    $("dkHint").textContent = "敬語：" + L().name + "（" + L().note + "）";
+  });
+}
+
+function renderSidebar(){
+  $("sbScroll").innerHTML = `<div class="sb-head">${esc(ACCOUNT)}</div>` + MAILBOXES.map(b => {
+    const n = (b.id === currentBox) ? threads.filter(t => t.unread).length : 0;
+    return `<button class="sb-item" data-box="${b.id}" aria-current="${b.id===currentBox}">
+      <svg class="icon" viewBox="0 0 24 24">${ICONS[b.icon]}</svg>
+      <span class="lbl">${b.name}</span>${n?`<span class="cnt">${n}</span>`:""}</button>`;
+  }).join("");
+  $("sbScroll").querySelectorAll("[data-box]").forEach(el => el.onclick = () => {
+    currentBox = el.dataset.box; currentId = null; current = null; load();
+  });
+}
+
+function renderList(){
+  const el = $("listScroll");
+  if(loading){ el.innerHTML = `<div class="thinking" style="padding:16px"><span class="spin"></span>読み込んでいます…</div>`; return; }
+  if(!threads.length){
+    el.innerHTML = `<div class="empty" style="height:100%">
+      <svg class="icon" viewBox="0 0 24 24">${ICONS.tray}</svg>
+      <div class="t">${query?"見つかりませんでした":"メッセージはありません"}</div>
+      <div class="s">${query?"別のことばで探すか、検索を消してください。":"新しいメールが届くとここに並びます。"}</div></div>`;
+    return;
+  }
+  el.innerHTML = threads.map(m => `
+    <button class="row ${m.unread?"unread":""}" data-id="${esc(m.id)}" role="option" aria-selected="${m.id===currentId}">
+      <span class="dot"></span><span>
+        <span class="r1"><span class="from">${esc(m.from)}</span><span class="date">${esc(m.date)}</span></span>
+        <span class="subj">${esc(m.subject)}</span>
+        <span class="prev">${esc(String(m.body||"").replace(/\n+/g," "))}</span>
+      </span></button>`).join("");
+  el.querySelectorAll("[data-id]").forEach(r => r.onclick = () => open(r.dataset.id));
+}
+
+async function open(id){
+  const row = threads.find(t => t.id === id);
+  if(!row) return;
+  currentId = id; current = null;
+  row.unread = false;                       // 見た目を先に更新
+  document.body.classList.add("reading");
+  renderSidebar(); renderList();
+  $("rdScroll").innerHTML = `<div class="thinking" style="padding:20px 28px"><span class="spin"></span>開いています…</div>`;
+  $("aiBar").hidden = true;
+  try{
+    current = await api("thread", { id });   // 裏側が Gmail 側も既読にする
+    renderReader();
+  }catch(e){
+    $("rdScroll").innerHTML = `<div class="status" style="padding:20px 28px">開けませんでした。${esc(e.message)}</div>`;
+  }
+}
+
+function renderReader(){
+  const scroll = $("rdScroll");
+  if(!current){
+    $("aiBar").hidden = true; $("btnReply").disabled = true; $("btnArchive").disabled = true;
+    scroll.innerHTML = `<div class="empty" style="height:100%">
+      <svg class="icon" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3.5 7 8.5 6 8.5-6"/></svg>
+      <div class="t">メッセージが選択されていません</div>
+      <div class="s">一覧から選ぶと本文と返信案が出ます。新規作成は画面下の欄から。</div></div>`;
+    return;
+  }
+  $("btnReply").disabled = false; $("btnArchive").disabled = false; $("aiBar").hidden = false;
+  const msgs = current.messages || [];
+  scroll.innerHTML = `
+    <div class="rd-head"><div class="rd-subj">${esc(current.subject)}</div></div>` +
+    msgs.map((m,i) => `
+      ${i ? `<div class="rd-sep"></div>` : ""}
+      <div class="rd-head" style="border-bottom:0;padding-top:${i?14:16}px;padding-bottom:0">
+        <div class="rd-meta" style="margin-top:0">
+          <div class="avatar">${esc(String(m.from||"?").trim().charAt(0))}</div>
+          <div class="rd-who"><div class="rd-name">${esc(m.from)}</div><div class="rd-to">宛先: ${esc(m.to)}</div></div>
+          <div class="rd-date">${esc(m.date)}</div>
+        </div></div>
+      <div class="rd-body">${esc(m.body)}</div>`).join("") +
+    `<div class="drafts" id="drafts"></div>`;
+  renderChips();
+}
+
+function renderChips(){
+  $("chips").innerHTML = settings.intents.map(i =>
+    `<button class="chip" data-intent="${esc(i.id)}">${esc(i.label)}</button>`).join("") +
+    `<button class="chip primary" data-intent="__free">自分で指示する</button>`;
+  $("chips").querySelectorAll("[data-intent]").forEach(b => b.onclick = () => {
+    if(b.dataset.intent === "__free"){
+      const t = prompt("どんな返信にしますか");
+      if(t) generate({ id:"free", label:"指示", hint:t });
+    } else generate(settings.intents.find(i => i.id === b.dataset.intent));
+  });
+}
+
+function lastMsg(){ const m = current && current.messages; return m ? m[m.length-1] : null; }
+
+async function generate(intent){
+  const m = lastMsg(), box = $("drafts");
+  if(!m || !box || !intent) return;
+  box.innerHTML = `<div class="thinking"><span class="spin"></span>敬語${esc(L().name)}で「${esc(intent.label)}」の返信を書いています…</div>`;
+  try{
+    const r = await api("reply", { intent:intent.id, hint:intent.hint, subject:m.subject, from:m.from, body:m.body });
+    box.innerHTML = (r.drafts||[]).map((d,i) => `
+      <div class="draft"><div class="draft-h"><span class="draft-tag">${esc(d.tag||("案"+(i+1)))}</span>
+        <span class="tb-spacer"></span><button class="draft-use" data-i="${i}">この案を開く</button></div>
+        <div class="draft-body">${esc(d.text)}</div></div>`).join("");
+    box.querySelectorAll("[data-i]").forEach(b => b.onclick = () => openCompose({
+      to:m.addr||"", subject:/^Re:/i.test(m.subject||"")?m.subject:"Re: "+(m.subject||""),
+      body:r.drafts[+b.dataset.i].text, title:"返信",
+      threadId: current.id, source:{ kind:"reply", intent:intent.id, hint:intent.hint, msg:m }
+    }));
+    box.scrollIntoView({ behavior:"smooth", block:"nearest" });
+  }catch(e){
+    box.innerHTML = `<div class="status">返信案を作れませんでした。${esc(e.message)}</div>`;
+  }
+}
+
+/* ---------- 読み込み ---------- */
+async function load(){
+  loading = true; renderSidebar(); renderList();
+  try{
+    const r = await api("threads", { box: currentBox, query, limit: 40 });
+    threads = r.threads || [];
+    banner(connected() ? "" : "ウェブアプリが未接続です。設定からURLと合言葉を入れてください。（いまは見本を表示しています）");
+  }catch(e){
+    threads = [];
+    banner("受信できませんでした。" + e.message);
+  }finally{
+    loading = false; renderSidebar(); renderList(); renderReader();
+  }
+}
+
+/* ---------- 下の欄 ---------- */
+const dkIn = $("dkIn");
+const autogrow = () => { dkIn.style.height = "auto"; dkIn.style.height = Math.min(dkIn.scrollHeight,132) + "px"; };
+dkIn.addEventListener("input", autogrow);
+dkIn.addEventListener("keydown", e => { if((e.metaKey||e.ctrlKey) && e.key === "Enter"){ e.preventDefault(); quick(); } });
+$("dkGo").onclick = quick;
+
+async function quick(){
+  const brief = dkIn.value.trim();
+  if(!brief){ $("dkHint").textContent = "宛先と用件を一息で書いてください。文章になっていなくて構いません。"; dkIn.focus(); return; }
+  $("dkGo").disabled = true;
+  $("dkHint").textContent = "読み取って敬語" + L().name + "で組み立てています…";
+  try{
+    const r = await api("quick", { brief });
+    openCompose({ to:r.to||"", cc:r.cc||"", subject:r.subject||"",
+      body:(r.drafts&&r.drafts[0]?r.drafts[0].text:""), title:"新規メッセージ", source:{ kind:"quick", brief } });
+    dkIn.value = ""; autogrow();
+    $("dkHint").textContent = r.note ? r.note : (r.to ? "" : "宛先が特定できませんでした。作成画面で入れてください。");
+  }catch(e){
+    $("dkHint").textContent = "組み立てられませんでした。" + e.message;
+  }finally{ $("dkGo").disabled = false; }
+}
+
+/* ---------- 作成 ---------- */
+let composeSource = null, composeThread = null;
+function openCompose(o = {}){
+  composeSource = o.source || null; composeThread = o.threadId || null;
+  $("cpTitle").textContent = o.title || "新規メッセージ";
+  $("cpTo").value = o.to || ""; $("cpCc").value = o.cc || "";
+  $("cpSubj").value = o.subject || ""; $("cpBody").value = o.body || "";
+  $("cpHint").textContent = ""; renderSeg($("cpSeg"));
+  $("compose").classList.add("on"); $("scrim").classList.add("on");
+  ($(o.body ? "cpBody" : "cpTo")).focus();
+}
+const closeCompose = () => { $("compose").classList.remove("on"); $("scrim").classList.remove("on"); };
+
+$("cpClose").onclick = closeCompose;
+$("scrim").onclick = () => { closeCompose(); closeSheet(); };
+$("btnBack").onclick = () => document.body.classList.remove("reading");
+$("btnRefresh").onclick = load;
+$("btnReply").onclick = () => {
+  const m = lastMsg(); if(!m) return;
+  openCompose({ to:m.addr, subject:/^Re:/i.test(m.subject||"")?m.subject:"Re: "+(m.subject||""),
+    title:"返信", threadId:current.id, body:"\n\n" + SIGNATURE });
+};
+$("btnArchive").onclick = async () => {
+  if(!currentId) return;
+  const id = currentId;
+  threads = threads.filter(t => t.id !== id);
+  currentId = null; current = null;
+  document.body.classList.remove("reading");
+  renderSidebar(); renderList(); renderReader();
+  try { await api("archive", { id }); } catch(e){ banner("アーカイブできませんでした。" + e.message); }
+};
+let qTimer = null;
+$("q").oninput = e => { query = e.target.value.trim(); clearTimeout(qTimer); qTimer = setTimeout(load, 400); };
+
+$("cpRedo").onclick = async () => {
+  $("cpHint").textContent = "敬語" + L().name + "で書き直しています…";
+  try{
+    let r;
+    if(composeSource && composeSource.kind === "reply"){
+      const m = composeSource.msg;
+      r = await api("reply", { intent:composeSource.intent, hint:composeSource.hint, subject:m.subject, from:m.from, body:m.body });
+    }else{
+      const brief = (composeSource && composeSource.brief) || $("cpBody").value.trim() || $("cpSubj").value.trim();
+      if(!brief){ $("cpHint").textContent = "先に本文か件名を入れてください"; return; }
+      r = await api("quick", { brief });
+      if(r.subject) $("cpSubj").value = r.subject;
+      if(r.to && !$("cpTo").value) $("cpTo").value = r.to;
+    }
+    if(r.drafts && r.drafts[0]) $("cpBody").value = r.drafts[0].text;
+    $("cpHint").textContent = "敬語：" + L().name;
+  }catch(e){ $("cpHint").textContent = e.message; }
+};
+
+$("cpSend").onclick = async () => {
+  if(!$("cpTo").value.trim()){ $("cpHint").textContent = "宛先が空です"; return; }
+  $("cpHint").textContent = "送信中…";
+  try{
+    const r = await api("send", { threadId:composeThread, to:$("cpTo").value,
+      cc:$("cpCc").value, subject:$("cpSubj").value, body:$("cpBody").value });
+    closeCompose();
+    banner("送信しました" + (r.from ? "（差出人: " + r.from + "）" : ""));
+    setTimeout(() => banner(""), 4000);
+  }catch(e){ $("cpHint").textContent = "送信できませんでした。" + e.message; }
+};
+
+/* ---------- 設定 ---------- */
+let armedDelete = null;
+const openSheet  = () => { renderSheet(); $("sheet").classList.add("on"); $("scrim").classList.add("on"); };
+const closeSheet = () => { armedDelete = null; $("sheet").classList.remove("on"); $("scrim").classList.remove("on"); };
+$("btnSettings").onclick = openSheet;
+$("shClose").onclick = closeSheet;
+
+function renderSheet(){
+  const lv = L();
+  $("shScroll").innerHTML = `
+    <div class="sh-sec">つなぎ先</div>
+    <div class="sh-row"><div class="k"><div class="n">ウェブアプリの URL</div>
+      <div class="d">Apps Script でデプロイしたときに出る /exec で終わるアドレス</div>
+      <input class="sh-in" id="inEp" value="${esc(settings.endpoint)}" placeholder="https://script.google.com/macros/s/.../exec" style="margin-top:7px"></div></div>
+    <div class="sh-row"><div class="k"><div class="n">合言葉</div>
+      <div class="d">Apps Script のスクリプトプロパティ APP_TOKEN と同じ文字列</div>
+      <input class="sh-in" id="inTk" value="${esc(settings.token)}" style="margin-top:7px"></div></div>
+    <div class="sh-row"><div class="k"><div class="n">${connected()?"接続済み":"未接続"}</div>
+      <div class="d">受信箱 ${esc(VIA)}／送信元 ${esc(ACCOUNT)}</div></div>
+      <button class="sh-btn" id="btnTest">確かめる</button></div>
+
+    <div class="sh-sec">敬語</div>
+    <div class="sh-row"><div class="k"><div class="n">いま：${esc(lv.name)}（${esc(lv.note)}）</div>
+      <div class="d">画面下の 弱／中／強 でいつでも切り替わります。返信案・新規作成の両方に効きます。</div></div></div>
+
+    <div class="sh-sec">署名</div>
+    <div class="sh-row"><div class="k"><div class="n">毎回この署名が付きます</div>
+      <div class="d">敬語の強さに関わらず固定。AI は書き換えません。</div>
+      <div class="sig-box">${esc(SIGNATURE)}</div>
+      <div class="d" style="margin-top:6px">変えるときは Code.gs の SIGNATURE を直してください。</div></div></div>
+
+    <div class="sh-sec">補足の指示（任意）</div>
+    <div class="sh-row"><div class="k">
+      <div class="d">毎回の生成に足したいこと。例：社名は正式名称で書く／時間は24時間表記</div>
+      <textarea class="sh-in" id="inMemo" rows="2" style="margin-top:7px">${esc(settings.memo||"")}</textarea></div></div>
+
+    <div class="sh-sec">返信のボタン</div>
+    ${settings.intents.map(i => `
+      <div class="sh-row"><div class="k"><div class="n">${esc(i.label)}</div><div class="d">${esc(i.hint)}</div></div>
+      <button class="sh-btn danger ${armedDelete===i.id?"armed":""}" data-del="${esc(i.id)}">${armedDelete===i.id?"もう一度で削除":"削除"}</button></div>`).join("")}
+    <div class="sh-row"><div class="k"><input class="sh-in" id="newLabel" placeholder="ボタン名（例: 見積を返す）"></div>
+      <button class="sh-btn" id="addIntent">追加</button></div>
+    <div class="sh-row"><div class="k"><input class="sh-in" id="newHint" placeholder="どう書いてほしいか"></div></div>
+
+    <div class="sh-sec">データ</div>
+    <div class="sh-row"><div class="k"><div class="n">書き出し・読み込み</div>
+      <div class="d">${store.persistent?"この端末に保存されています。":"この画面ではブラウザ保存が使えません。閉じると設定は消えます。"}</div></div>
+      <button class="sh-btn" id="btnExport">書き出す</button><button class="sh-btn" id="btnImport">読み込む</button></div>
+    <div class="status" id="shStatus"></div>`;
+
+  const rerender = () => { flush(); renderSheet(); };
+  $("inEp").oninput = e => { settings.endpoint = e.target.value.trim(); save(); };
+  $("inTk").oninput = e => { settings.token = e.target.value.trim(); save(); };
+  $("inMemo").oninput = e => { settings.memo = e.target.value; save(); };
+  $("btnTest").onclick = async () => {
+    flush(); $("shStatus").textContent = "確かめています…";
+    try { await api("threads", { box:"INBOX", limit:1 });
+      $("shStatus").textContent = connected() ? "つながりました。" : "未接続です。URL と合言葉を入れてください。";
+      load();
+    } catch(e){ $("shStatus").textContent = "つながりませんでした。" + e.message; }
+  };
+  $("addIntent").onclick = () => {
+    const label = $("newLabel").value.trim(); if(!label) return;
+    settings.intents.push({ id:"c"+Date.now(), label, hint:$("newHint").value.trim()||label });
+    armedDelete = null; rerender(); renderChips();
+  };
+  $("shScroll").querySelectorAll("[data-del]").forEach(b => b.onclick = () => {
+    const id = b.dataset.del;
+    if(armedDelete !== id){ armedDelete = id; renderSheet(); return; }
+    settings.intents = settings.intents.filter(i => i.id !== id);
+    armedDelete = null; rerender(); renderChips();
+  });
+  $("btnExport").onclick = () => {
+    flush();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(settings,null,2)], {type:"application/json"}));
+    a.download = "mail-settings-" + new Date().toISOString().slice(0,10) + ".json";
+    a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+    $("shStatus").textContent = "書き出しました。";
+  };
+  $("btnImport").onclick = () => {
+    const f = document.createElement("input"); f.type = "file"; f.accept = "application/json,.json";
+    f.onchange = () => {
+      const file = f.files && f.files[0]; if(!file) return;
+      const rd = new FileReader();
+      rd.onload = () => {
+        const d = migrate(rd.result);
+        if(!d){ $("shStatus").textContent = "読み込めませんでした。書き出したファイルを選んでください。"; return; }
+        settings = d; flush(); renderSheet(); renderChips();
+        renderSeg($("seg")); renderSeg($("cpSeg")); load();
+        $("shStatus").textContent = "読み込みました。";
+      };
+      rd.readAsText(file);
+    };
+    f.click();
+  };
+}
+
+addEventListener("keydown", e => {
+  if(e.key === "Escape"){ closeCompose(); closeSheet(); }
+  if((e.metaKey||e.ctrlKey) && e.key.toLowerCase() === "n"){ e.preventDefault(); openCompose(); }
+});
+
+renderSeg($("seg")); renderSeg($("cpSeg"));
+$("dkHint").textContent = "敬語：" + L().name + "（" + L().note + "）　⌘+Enter で作成";
+autogrow();
+renderReader();
+load();
+</script>
+</body>
+</html>
