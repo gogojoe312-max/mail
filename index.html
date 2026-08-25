@@ -108,6 +108,9 @@ input,textarea{font-family:inherit;font-size:inherit;color:inherit}
 .rd-date{font-size:12px;color:var(--text-2);flex:0 0 auto;white-space:nowrap}
 .rd-body{padding:16px 28px;font-size:13.5px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;max-width:760px}
 .rd-sep{margin:0 28px;border-top:1px dashed var(--hairline);padding-top:4px}
+.rd-older{margin:18px 28px 0;padding-top:10px;border-top:1px solid var(--hairline);font-size:11px;font-weight:600;color:var(--text-3)}
+button.rd-meta{background:none;border:0;padding:0;cursor:pointer}
+button.rd-meta:hover .rd-to{color:var(--accent)}
 
 .ai-bar{flex:0 0 auto;border-top:1px solid var(--hairline);background:var(--toolbar-bg);padding:11px 20px 13px}
 .ai-lbl{font-size:11px;font-weight:600;color:var(--text-3);margin-bottom:8px}
@@ -252,9 +255,10 @@ input,textarea{font-family:inherit;font-size:inherit;color:inherit}
   <div class="dk-bar">
     <div class="seg" id="seg" role="group" aria-label="文体"></div>
     <span class="dk-hint" id="dkHint"></span>
+    <button class="chip" id="dkNew" hidden>新規メール</button>
     <button class="dk-go" id="dkGo">
       <svg class="icon" viewBox="0 0 24 24" style="stroke-width:1.5"><path d="M12 3.5 13.6 9 19 10.6 13.6 12.2 12 17.7 10.4 12.2 5 10.6 10.4 9z"/></svg>
-      作成
+      <span id="dkGoLabel">作成</span>
     </button>
   </div>
 </div>
@@ -278,6 +282,15 @@ input,textarea{font-family:inherit;font-size:inherit;color:inherit}
     <button class="chip" id="cpRedo">この文体で書き直す</button>
     <span class="cp-hint" id="cpHint"></span>
   </div>
+</div>
+
+<div class="sheet" id="people" role="dialog" aria-modal="true" aria-label="宛先">
+  <div class="cp-top">
+    <div class="tb-btn" style="visibility:hidden"></div>
+    <div class="cp-title">宛先</div>
+    <button class="tb-btn" id="pplClose" aria-label="閉じる"><svg class="icon" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+  </div>
+  <div class="sh-scroll" id="pplScroll"></div>
 </div>
 
 <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-label="設定">
@@ -479,13 +492,18 @@ const connected = () => !!(settings.endpoint && settings.token);
 /* ---------- 裏側呼び出し ---------- */
 async function api(action, payload = {}){
   if(!connected()) { await new Promise(r=>setTimeout(r,600)); return demo(action, payload); }
-  const res = await fetch(settings.endpoint, {
-    method:"POST",
-    headers:{ "Content-Type":"text/plain;charset=utf-8" },
-    body: JSON.stringify(Object.assign({
-      action, token: settings.token, fast: !!settings.fast
-    }, payload))
-  });
+  let res;
+  try{
+    res = await fetch(settings.endpoint, {
+      method:"POST",
+      headers:{ "Content-Type":"text/plain;charset=utf-8" },
+      body: JSON.stringify(Object.assign({
+        action, token: settings.token, fast: !!settings.fast
+      }, payload))
+    });
+  }catch(e){
+    throw new Error("ウェブアプリに届きませんでした。設定のURLが古い可能性があります。");
+  }
   if(!res.ok) throw new Error("ウェブアプリが応答しません（" + res.status + "）");
   const data = await res.json();
   if(data.error) throw new Error(data.error);
@@ -615,6 +633,7 @@ async function open(id){
   currentId = id;
   row.unread = false;
   currentDrafts = null; draftsBusy = false; draftsError = "";
+  dockForceNew = false;
   document.body.classList.add("reading");
   // 一覧が持っている分でまず表示する。全文は裏で取りに行く。
   current = { id: id, subject: row.subject, messages: [{ id: row.msgId || id, from: row.from,
@@ -633,45 +652,76 @@ function renderReader(){
   if(!current){
     $("aiBar").hidden = true; $("btnReply").disabled = true;
     $("btnReplyAll").disabled = true; $("btnArchive").disabled = true;
+    updateDock();
     scroll.innerHTML = `<div class="empty" style="height:100%">
       <svg class="icon" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3.5 7 8.5 6 8.5-6"/></svg>
       <div class="t">メッセージが選択されていません</div>
       <div class="s">一覧から選ぶと本文と返信案が出ます。新規作成は画面下の欄から。</div></div>`;
     return;
   }
-  $("btnReply").disabled = false; $("btnReplyAll").disabled = false;
-  $("btnArchive").disabled = false; $("aiBar").hidden = false;
+  const canReply = !!replyTarget();
+  $("btnReply").disabled = !canReply; $("btnReplyAll").disabled = !canReply;
+  $("btnArchive").disabled = false; $("aiBar").hidden = !canReply;
   renderSeg($("rpSeg"));
-  const msgs = current.messages || [];
+  // 新しい順に並べる。いま読んでいるメールが必ず先頭。
+  const msgs = (current.messages || []).slice().reverse();
   scroll.innerHTML = `
     <div class="rd-head"><div class="rd-subj">${esc(current.subject)}</div></div>
     <div class="drafts" id="drafts"></div>` +
     msgs.map((m,i) => `
-      ${i ? `<div class="rd-sep"></div>` : ""}
+      ${i === 1 ? `<div class="rd-older">以前のやり取り</div>` : (i ? `<div class="rd-sep"></div>` : "")}
       <div class="rd-head" style="border-bottom:0;padding-top:${i?14:16}px;padding-bottom:0">
-        <div class="rd-meta" style="margin-top:0">
-          <div class="avatar">${esc(String(m.from||"?").trim().charAt(0))}</div>
-          <div class="rd-who"><div class="rd-name">${esc(m.from)}</div><div class="rd-to">宛先: ${esc(m.to)}</div></div>
-          <div class="rd-date">${esc(m.date)}</div>
-        </div></div>
+        <button class="rd-meta" data-people="${i}" style="margin-top:0;width:100%;text-align:left">
+          <span class="avatar">${esc(String(m.from||"?").trim().charAt(0))}</span>
+          <span class="rd-who"><span class="rd-name">${esc(m.from)}${MINE.test(m.addr||"") ? "（自分）" : ""}</span>
+            <span class="rd-to">宛先: ${esc(recipientSummary(m))} ›</span></span>
+          <span class="rd-date">${esc(m.date)}</span>
+        </button></div>
       <div class="rd-body">${esc(m.body)}</div>`).join("");
+  scroll.querySelectorAll("[data-people]").forEach(b =>
+    b.onclick = () => openPeople(msgs[+b.dataset.people]));
   renderChips();
   renderDrafts();
+  updateDock();
 }
 
 function renderChips(){
   $("chips").innerHTML = settings.intents.map(i =>
-    `<button class="chip" data-intent="${esc(i.id)}">${esc(i.label)}</button>`).join("") +
-    `<button class="chip primary" data-intent="__free">自分で指示する</button>`;
-  $("chips").querySelectorAll("[data-intent]").forEach(b => b.onclick = () => {
-    if(b.dataset.intent === "__free"){
-      const t = prompt("どんな返信にしますか");
-      if(t) generate({ id:"free", label:"指示", hint:t });
-    } else generate(settings.intents.find(i => i.id === b.dataset.intent));
-  });
+    `<button class="chip" data-intent="${esc(i.id)}">${esc(i.label)}</button>`).join("");
+  $("chips").querySelectorAll("[data-intent]").forEach(b => b.onclick = () =>
+    generate(settings.intents.find(i => i.id === b.dataset.intent)));
 }
 
 function lastMsg(){ const m = current && current.messages; return m ? m[m.length-1] : null; }
+
+// 返信の相手。自分が最後に送っていたら、その前の受信メールを対象にする。
+function replyTarget(){
+  const m = current && current.messages;
+  if(!m || !m.length) return null;
+  for(let i = m.length - 1; i >= 0; i--){
+    if(!MINE.test(m[i].addr || "")) return m[i];
+  }
+  return null;   // 全部自分の送信なら返信案は出さない
+}
+
+// 宛先の要約表示
+function recipientSummary(m){
+  const all = addrList(m.to).concat(addrList(m.cc));
+  if(!all.length) return m.to || "";
+  const head = all[0].name || all[0].addr;
+  return all.length > 1 ? head + " 他" + (all.length - 1) + "人" : head;
+}
+
+// "名前 <a@b.c>, x@y.z" を分解する
+function addrList(raw){
+  return String(raw || "").split(",").map(one => {
+    const t = one.trim();
+    if(!t) return null;
+    const m2 = t.match(/^\s*"?([^"<]*)"?\s*<([^>]+)>\s*$/);
+    if(m2) return { name: m2[1].trim(), addr: m2[2].trim() };
+    return { name: "", addr: t };
+  }).filter(Boolean);
+}
 
 // 全員に返信のCc。自分のアドレスと差出人は外す。
 const MINE = /(@ufg\.co\.jp|@bu\.k-cloud90\.biz)/i;
@@ -705,7 +755,7 @@ function renderDrafts(){
       <button class="draft-use" data-all="${i}">全員に返信</button></div>
       <div class="draft-body">${esc(d.text)}</div></div>`).join("");
   const openDraft = (idx, all) => {
-    const m = lastMsg(), d = currentDrafts[idx];
+    const m = replyTarget(), d = currentDrafts[idx];
     if(!m || !d) return;
     openCompose({
       to:m.addr||"", cc: all ? replyAllCc(m) : "",
@@ -720,7 +770,7 @@ function renderDrafts(){
 }
 
 async function generate(intent){
-  const m = lastMsg();
+  const m = replyTarget();
   if(!m || !intent) return;
   lastIntent = intent;
   draftsBusy = true; draftsError = ""; currentDrafts = null;
@@ -753,6 +803,7 @@ async function generate(intent){
   }catch(e){
     draftsBusy = false;
     draftsError = "返信案を作れませんでした。" + e.message;
+    banner(draftsError);
     renderDrafts();
   }
 }
@@ -783,11 +834,27 @@ async function load(){
 }
 
 /* ---------- 下の欄 ---------- */
+// メールを開いている間、下の欄は「返信の指示」欄になる。
+let dockForceNew = false;
+function dockMode(){
+  if(dockForceNew) return "new";
+  return (document.body.classList.contains("reading") && current && replyTarget()) ? "reply" : "new";
+}
+function updateDock(){
+  const reply = dockMode() === "reply";
+  const t = reply ? replyTarget() : null;
+  dkIn.placeholder = reply ? "返信の指示" : "用件";
+  $("dkGoLabel").textContent = reply ? "返信案" : "作成";
+  $("dkNew").hidden = !reply;
+  $("dkHint").textContent = reply && t ? "返信: " + (t.from || t.addr || "") : "";
+}
+
 const dkIn = $("dkIn");
 const autogrow = () => { dkIn.style.height = "auto"; dkIn.style.height = Math.max(120, Math.min(dkIn.scrollHeight, Math.round(innerHeight*0.46))) + "px"; };
 dkIn.addEventListener("input", autogrow);
 dkIn.addEventListener("keydown", e => { if((e.metaKey||e.ctrlKey) && e.key === "Enter"){ e.preventDefault(); quick(); } });
 $("dkGo").onclick = quick;
+$("dkNew").onclick = () => { dockForceNew = true; updateDock(); dkIn.focus(); };
 
 // 走り書き → 新規メール
 async function composeFromBrief(brief){
@@ -824,6 +891,11 @@ async function composeFromBrief(brief){
 async function quick(){
   const brief = dkIn.value.trim();
   if(!brief){ dkIn.focus(); return; }
+  if(dockMode() === "reply"){
+    dkIn.value = ""; autogrow();
+    await generate({ id:"free", label:"指示", hint: brief });
+    return;
+  }
   $("dkGo").disabled = true;
   $("dkHint").textContent = "「" + L().name + "」で組み立てています…";
   try{
@@ -833,7 +905,8 @@ async function quick(){
     dkIn.value = ""; autogrow();
     $("dkHint").textContent = r.note ? r.note : (r.to ? "" : "宛先が特定できませんでした。作成画面で入れてください。");
   }catch(e){
-    $("dkHint").textContent = "組み立てられませんでした。" + e.message;
+    $("dkHint").textContent = "作成できませんでした";
+    banner("作成できませんでした。" + e.message);   // 細い行だと読めないので帯にも出す
   }finally{ $("dkGo").disabled = false; }
 }
 
@@ -861,11 +934,11 @@ function openCompose(o = {}){
 const closeCompose = () => { $("compose").classList.remove("on"); $("scrim").classList.remove("on"); };
 
 $("cpClose").onclick = closeCompose;
-$("scrim").onclick = () => { closeCompose(); closeSheet(); };
-$("btnBack").onclick = () => document.body.classList.remove("reading");
+$("scrim").onclick = () => { closeCompose(); closeSheet(); closePeople(); };
+$("btnBack").onclick = () => { document.body.classList.remove("reading"); updateDock(); };
 $("btnRefresh").onclick = load;
 function openReply(all){
-  const m = lastMsg(); if(!m) return;
+  const m = replyTarget(); if(!m) return;
   openCompose({ to:m.addr, cc: all ? replyAllCc(m) : "",
     subject:/^Re:/i.test(m.subject||"")?m.subject:"Re: "+(m.subject||""),
     title: all ? "全員に返信" : "返信", threadId:current.id, all,
@@ -921,6 +994,62 @@ $("cpSend").onclick = async () => {
     setTimeout(() => banner(""), 4000);
   }catch(e){ $("cpHint").textContent = "送信できませんでした。" + e.message; }
 };
+
+/* ---------- 宛先の一覧 ---------- */
+function openPeople(m){
+  if(!m) return;
+  const rows = [];
+  const add = (label, list) => list.forEach(p => rows.push({ label, name:p.name, addr:p.addr }));
+  add("差出人", [{ name:m.from || "", addr:m.addr || "" }]);
+  add("宛先", addrList(m.to));
+  add("Cc", addrList(m.cc));
+
+  const seen = {};
+  const uniq = rows.filter(r => {
+    const k = r.label + "|" + (r.addr || "").toLowerCase();
+    if(!r.addr || seen[k]) return false;
+    seen[k] = 1; return true;
+  });
+
+  $("pplScroll").innerHTML = uniq.map((r,i) => `
+    <div class="sh-row"><div class="k">
+      <div class="n">${esc(r.name || r.addr)}${MINE.test(r.addr) ? "（自分）" : ""}</div>
+      <div class="d">${esc(r.label)}　${esc(r.addr)}</div></div></div>
+    <div class="sh-row" style="border-bottom:0;padding-top:0;gap:7px">
+      <button class="sh-btn" data-mail="${i}">メールを書く</button>
+      <button class="sh-btn" data-copy="${i}">アドレスをコピー</button>
+      <button class="sh-btn" data-contact="${i}">連絡先に追加</button>
+      <div class="k"></div>
+    </div>`).join("") +
+    `<div class="sh-row" style="border-bottom:0"><div class="k">
+      <button class="sh-btn" id="pplAll">全員にメールを書く</button></div></div>
+     <div class="status" id="pplStatus"></div>`;
+
+  const copy = async (t) => {
+    try { await navigator.clipboard.writeText(t); $("pplStatus").textContent = "コピーしました: " + t; }
+    catch(e){ $("pplStatus").textContent = "コピーできませんでした"; }
+  };
+  $("pplScroll").querySelectorAll("[data-mail]").forEach(b => b.onclick = () => {
+    const r = uniq[+b.dataset.mail];
+    closePeople(); openCompose({ to:r.addr, title:"新規メッセージ" });
+  });
+  $("pplScroll").querySelectorAll("[data-copy]").forEach(b => b.onclick = () => copy(uniq[+b.dataset.copy].addr));
+  $("pplScroll").querySelectorAll("[data-contact]").forEach(b => b.onclick = async () => {
+    const r = uniq[+b.dataset.contact];
+    await copy(r.addr);
+    $("pplStatus").textContent = "アドレスをコピーしました。連絡先の新規作成画面に貼り付けてください。";
+    window.open("https://contacts.google.com/new", "_blank");
+  });
+  $("pplAll").onclick = () => {
+    const others = uniq.filter(r => !MINE.test(r.addr)).map(r => r.addr);
+    closePeople();
+    openCompose({ to:others[0] || "", cc:others.slice(1).join(", "), title:"新規メッセージ" });
+  };
+
+  $("people").classList.add("on"); $("scrim").classList.add("on");
+}
+const closePeople = () => { $("people").classList.remove("on"); $("scrim").classList.remove("on"); };
+$("pplClose").onclick = closePeople;
 
 /* ---------- 設定 ---------- */
 let armedDelete = null, armedTerm = null;
@@ -1059,12 +1188,13 @@ addEventListener("pageshow", () => { if(connected()) load(); });
 autoRefresh();
 
 addEventListener("keydown", e => {
-  if(e.key === "Escape"){ closeCompose(); closeSheet(); }
+  if(e.key === "Escape"){ closeCompose(); closeSheet(); closePeople(); }
   if((e.metaKey||e.ctrlKey) && e.key.toLowerCase() === "n"){ e.preventDefault(); openCompose(); }
 });
 
 refreshSegs();
 autogrow();
+updateDock();
 renderReader();
 load();
 </script>
