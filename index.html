@@ -301,7 +301,7 @@ const LEVELS = {
 const LEVEL_ORDER = ["weak","mid","strong"];
 
 /* ---------- 保存 ---------- */
-const KEY = "mailai.v1", SCHEMA = 3;
+const KEY = "mailai.v1", SCHEMA = 4;
 const store = (() => {
   let ok = false;
   try { localStorage.setItem("_t","1"); localStorage.removeItem("_t"); ok = true; } catch(e){}
@@ -310,6 +310,11 @@ const store = (() => {
     get(k){ try { if(ok) return localStorage.getItem(k); return (k in mem) ? mem[k] : null; } catch(e){ return (k in mem) ? mem[k] : null; } },
     set(k,v){ try { ok ? localStorage.setItem(k,v) : (mem[k]=v); } catch(e){ mem[k]=v; } } };
 })();
+
+const DEFAULT_TERMS = [
+  { from:"お茶の間", to:"OCHA NORMA" },
+  { from:"ロージー", to:"ロージークロニクル" }
+];
 
 const DEFAULT_INTENTS = [
   { id:"ok",       label:"了解する",   hint:"内容を受けて承諾する" },
@@ -330,6 +335,7 @@ function migrate(raw){
     delete d.tone; delete d.signature;
   }
   if(v < 3){ d.endpoint = d.endpoint || ""; d.token = d.token || ""; }
+  if(v < 4){ if(!Array.isArray(d.terms)) d.terms = DEFAULT_TERMS.slice(); }
   d.schema = SCHEMA;
   if(!Array.isArray(d.intents) || !d.intents.length) d.intents = DEFAULT_INTENTS.slice();
   if(!LEVELS[d.level]) d.level = "mid";
@@ -337,7 +343,8 @@ function migrate(raw){
 }
 
 let settings = migrate(store.get(KEY)) || {
-  schema: SCHEMA, level:"mid", memo:"", endpoint:"", token:"", intents: DEFAULT_INTENTS.slice()
+  schema: SCHEMA, level:"mid", memo:"", endpoint:"", token:"",
+  terms: DEFAULT_TERMS.slice(), intents: DEFAULT_INTENTS.slice()
 };
 
 let saveTimer = null;
@@ -357,7 +364,8 @@ async function api(action, payload = {}){
     method:"POST",
     headers:{ "Content-Type":"text/plain;charset=utf-8" },
     body: JSON.stringify(Object.assign({
-      action, token: settings.token, level: settings.level, memo: settings.memo || ""
+      action, token: settings.token, level: settings.level,
+      memo: settings.memo || "", terms: settings.terms || []
     }, payload))
   });
   if(!res.ok) throw new Error("ウェブアプリが応答しません（" + res.status + "）");
@@ -402,6 +410,7 @@ const MAILBOXES = [
   { id:"TRASH", name:"ゴミ箱", icon:"trash" }
 ];
 let threads = [], currentBox = "INBOX", currentId = null, current = null, query = "", loading = false;
+let lastIntent = null, lastGenerated = "";
 
 /* ---------- 部品 ---------- */
 const ICONS = {
@@ -421,9 +430,21 @@ function renderSeg(el){
   el.querySelectorAll("[data-lv]").forEach(b => b.onclick = () => {
     settings.level = b.dataset.lv; flush();
     refreshSegs();
+    onLevelChanged();
   });
 }
 function refreshSegs(){ ["seg","cpSeg","rpSeg"].forEach(id => { const el = $(id); if(el) renderSeg(el); }); }
+
+// 敬語を変えたら、その場で書き直す。手で直した本文は上書きしない。
+function onLevelChanged(){
+  if($("compose").classList.contains("on")){
+    if($("cpBody").value === lastGenerated) redo();
+    else $("cpHint").textContent = "編集済みのため書き直していません";
+    return;
+  }
+  const box = $("drafts");
+  if(box && box.innerHTML.trim() && lastIntent) generate(lastIntent);
+}
 
 function renderSidebar(){
   $("sbScroll").innerHTML = `<div class="sb-head">${esc(ACCOUNT)}</div>` + MAILBOXES.map(b => {
@@ -521,6 +542,7 @@ function lastMsg(){ const m = current && current.messages; return m ? m[m.length
 async function generate(intent){
   const m = lastMsg(), box = $("drafts");
   if(!m || !box || !intent) return;
+  lastIntent = intent;
   box.innerHTML = `<div class="thinking"><span class="spin"></span>敬語${esc(L().name)}で「${esc(intent.label)}」の返信を書いています…</div>`;
   try{
     const r = await api("reply", { intent:intent.id, hint:intent.hint, subject:m.subject, from:m.from, body:m.body });
@@ -593,6 +615,7 @@ function openCompose(o = {}){
   $("cpTitle").textContent = o.title || "新規メッセージ";
   $("cpTo").value = o.to || ""; $("cpCc").value = o.cc || "";
   $("cpSubj").value = o.subject || ""; $("cpBody").value = o.body || "";
+  lastGenerated = o.body || "";
   $("cpHint").textContent = ""; renderSeg($("cpSeg"));
   $("compose").classList.add("on"); $("scrim").classList.add("on");
   ($(o.body ? "cpBody" : "cpTo")).focus();
@@ -620,7 +643,8 @@ $("btnArchive").onclick = async () => {
 let qTimer = null;
 $("q").oninput = e => { query = e.target.value.trim(); clearTimeout(qTimer); qTimer = setTimeout(load, 400); };
 
-$("cpRedo").onclick = async () => {
+$("cpRedo").onclick = redo;
+async function redo(){
   $("cpHint").textContent = "敬語" + L().name + "で書き直しています…";
   try{
     let r;
@@ -634,10 +658,10 @@ $("cpRedo").onclick = async () => {
       if(r.subject) $("cpSubj").value = r.subject;
       if(r.to && !$("cpTo").value) $("cpTo").value = r.to;
     }
-    if(r.drafts && r.drafts[0]) $("cpBody").value = r.drafts[0].text;
+    if(r.drafts && r.drafts[0]){ $("cpBody").value = r.drafts[0].text; lastGenerated = r.drafts[0].text; }
     $("cpHint").textContent = "敬語：" + L().name;
   }catch(e){ $("cpHint").textContent = e.message; }
-};
+}
 
 $("cpSend").onclick = async () => {
   if(!$("cpTo").value.trim()){ $("cpHint").textContent = "宛先が空です"; return; }
@@ -652,9 +676,9 @@ $("cpSend").onclick = async () => {
 };
 
 /* ---------- 設定 ---------- */
-let armedDelete = null;
+let armedDelete = null, armedTerm = null;
 const openSheet  = () => { renderSheet(); $("sheet").classList.add("on"); $("scrim").classList.add("on"); };
-const closeSheet = () => { armedDelete = null; $("sheet").classList.remove("on"); $("scrim").classList.remove("on"); };
+const closeSheet = () => { armedDelete = null; armedTerm = null; $("sheet").classList.remove("on"); $("scrim").classList.remove("on"); };
 $("btnSettings").onclick = openSheet;
 $("shClose").onclick = closeSheet;
 
@@ -687,6 +711,14 @@ function renderSheet(){
       <div class="d">毎回の生成に足したいこと。例：社名は正式名称で書く／時間は24時間表記</div>
       <textarea class="sh-in" id="inMemo" rows="2" style="margin-top:7px">${esc(settings.memo||"")}</textarea></div></div>
 
+    <div class="sh-sec">言い換え</div>
+    ${(settings.terms||[]).map((t,i) => `
+      <div class="sh-row"><div class="k"><div class="n">${esc(t.from)} → ${esc(t.to)}</div></div>
+      <button class="sh-btn danger ${armedTerm===i?"armed":""}" data-delterm="${i}">${armedTerm===i?"もう一度で削除":"削除"}</button></div>`).join("")}
+    <div class="sh-row"><div class="k"><input class="sh-in" id="newFrom" placeholder="普段の言い方（例: お茶の間）"></div>
+      <div class="k"><input class="sh-in" id="newTo" placeholder="正式名称（例: OCHA NORMA）"></div>
+      <button class="sh-btn" id="addTerm">追加</button></div>
+
     <div class="sh-sec">返信のボタン</div>
     ${settings.intents.map(i => `
       <div class="sh-row"><div class="k"><div class="n">${esc(i.label)}</div><div class="d">${esc(i.hint)}</div></div>
@@ -712,6 +744,19 @@ function renderSheet(){
       load();
     } catch(e){ $("shStatus").textContent = "つながりませんでした。" + e.message; }
   };
+  $("addTerm").onclick = () => {
+    const from = $("newFrom").value.trim(), to = $("newTo").value.trim();
+    if(!from || !to) return;
+    if(!Array.isArray(settings.terms)) settings.terms = [];
+    settings.terms.push({ from, to });
+    armedTerm = null; rerender();
+  };
+  $("shScroll").querySelectorAll("[data-delterm]").forEach(b => b.onclick = () => {
+    const i = +b.dataset.delterm;
+    if(armedTerm !== i){ armedTerm = i; renderSheet(); return; }
+    settings.terms.splice(i, 1);
+    armedTerm = null; rerender();
+  });
   $("addIntent").onclick = () => {
     const label = $("newLabel").value.trim(); if(!label) return;
     settings.intents.push({ id:"c"+Date.now(), label, hint:$("newHint").value.trim()||label });
