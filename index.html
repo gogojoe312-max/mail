@@ -320,6 +320,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
+const BUILD = "2026-08-26 08:45";   // 設定の一番下に出る。読み込まれているファイルの確認用。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -1245,7 +1246,8 @@ function renderSheet(){
     <div class="sh-row"><div class="k"><div class="n">書き出し・読み込み</div>
       <div class="d">${store.persistent?"この端末に保存されています。":"この画面ではブラウザ保存が使えません。閉じると設定は消えます。"}</div></div>
       <button class="sh-btn" id="btnExport">書き出す</button><button class="sh-btn" id="btnImport">読み込む</button></div>
-    <div class="status" id="shStatus"></div>`;
+    <div class="status" id="shStatus"></div>
+    <div class="status" style="opacity:.6">ビルド ${BUILD}</div>`;
 
   const rerender = () => { flush(); renderSheet(); };
   $("inEp").oninput = e => { settings.endpoint = e.target.value.trim(); save(); };
