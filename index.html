@@ -437,7 +437,7 @@ function polish(body, counterpart){
 }
 
 /* ---------- 保存 ---------- */
-const KEY = "mailai.v1", SCHEMA = 5;
+const KEY = "mailai.v1", SCHEMA = 6;
 const store = (() => {
   let ok = false;
   try { localStorage.setItem("_t","1"); localStorage.removeItem("_t"); ok = true; } catch(e){}
@@ -473,6 +473,7 @@ function migrate(raw){
   if(v < 3){ d.endpoint = d.endpoint || ""; d.token = d.token || ""; }
   if(v < 4){ if(!Array.isArray(d.terms)) d.terms = DEFAULT_TERMS.slice(); }
   if(v < 5){ d.fast = !!d.fast; }
+  if(v < 6){ d.apiKey = d.apiKey || ""; }
   d.schema = SCHEMA;
   if(!Array.isArray(d.intents) || !d.intents.length) d.intents = DEFAULT_INTENTS.slice();
   if(!LEVELS[d.level]) d.level = "mid";
@@ -480,7 +481,7 @@ function migrate(raw){
 }
 
 let settings = migrate(store.get(KEY)) || {
-  schema: SCHEMA, level:"mid", memo:"", endpoint:"", token:"", fast:false,
+  schema: SCHEMA, level:"mid", memo:"", endpoint:"", token:"", fast:false, apiKey:"",
   terms: DEFAULT_TERMS.slice(), intents: DEFAULT_INTENTS.slice()
 };
 
@@ -515,9 +516,75 @@ async function api(action, payload = {}){
   return data;
 }
 
+const MODEL = "claude-sonnet-5";
+const MODEL_FAST = "claude-haiku-4-5-20251001";
+
+// キーが入っていれば Claude を直接呼ぶ。往復が1回減り、書きながら流せる。
+// 入っていなければ従来どおり Apps Script 経由。
+async function aiText(system, user, onDelta, maxTokens){
+  if(!settings.apiKey){
+    const r = await api("ai", { system, user, maxTokens });
+    return r.text || "";
+  }
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": settings.apiKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true"
+    },
+    body: JSON.stringify({
+      model: settings.fast ? MODEL_FAST : MODEL,
+      max_tokens: maxTokens || 1600,
+      thinking: { type: "disabled" },
+      stream: true,
+      system, messages: [{ role: "user", content: user }]
+    })
+  });
+  if(!res.ok){
+    let why = "";
+    try { why = (await res.json()).error.message; } catch(e){}
+    throw new Error("AI が応答しませんでした（" + res.status + "）" + why);
+  }
+  const reader = res.body.getReader(), dec = new TextDecoder();
+  let buf = "", text = "";
+  for(;;){
+    const { done, value } = await reader.read();
+    if(done) break;
+    buf += dec.decode(value, { stream:true });
+    let i;
+    while((i = buf.indexOf("\n\n")) !== -1){
+      const chunk = buf.slice(0, i); buf = buf.slice(i + 2);
+      for(const line of chunk.split("\n")){
+        if(!line.startsWith("data:")) continue;
+        const d = line.slice(5).trim();
+        if(!d || d === "[DONE]") continue;
+        let ev; try { ev = JSON.parse(d); } catch(e){ continue; }
+        if(ev.type === "error") throw new Error((ev.error && ev.error.message) || "AI エラー");
+        if(ev.type === "content_block_delta" && ev.delta && ev.delta.text){
+          text += ev.delta.text;
+          if(onDelta) onDelta(text);
+        }
+      }
+    }
+  }
+  if(!text) throw new Error("AI の返答が空でした");
+  return text;
+}
+
 async function ai(system, user, maxTokens){
-  const r = await api("ai", { system, user, maxTokens });
-  return parseJson(r.text || "");
+  return parseJson(await aiText(system, user, null, maxTokens));
+}
+
+// 返信案は JSON をやめ、区切り記号で流せる形にする
+function parseDrafts(text){
+  return String(text || "").split(/\n?%%%\n?/).map(b => {
+    const lines = b.replace(/^\s+/, "").split("\n");
+    let tag = "";
+    if(/^TAG\s*[:：]/i.test(lines[0] || "")) tag = lines.shift().replace(/^TAG\s*[:：]\s*/i, "").trim();
+    return { tag, text: lines.join("\n").trim() };
+  }).filter(d => d.text);
 }
 
 let contactCache = null;
@@ -565,7 +632,7 @@ const MAILBOXES = [
 ];
 let threads = [], currentBox = "INBOX", currentId = null, current = null, query = "", loading = false;
 let lastIntent = null, lastGenerated = "";
-let currentDrafts = null, draftsBusy = false, draftsError = "";
+let currentDrafts = null, draftsBusy = false, draftsError = "", streamText = "";
 let openMsgs = {};   // メールごとの開閉。既定は最新だけ開く。
 
 /* ---------- 部品 ---------- */
@@ -789,7 +856,11 @@ function renderDrafts(){
   const box = $("drafts");
   if(!box) return;
   if(draftsBusy){
-    box.innerHTML = `<div class="thinking"><span class="spin"></span>「${esc(L().name)}」で返信を書いています…</div>`;
+    const partial = parseDrafts(streamText);
+    box.innerHTML = `<div class="thinking"><span class="spin"></span>「${esc(L().name)}」で返信を書いています…</div>` +
+      partial.map((d,i) => `
+        <div class="draft"><div class="draft-h"><span class="draft-tag">${esc(d.tag||("案"+(i+1)))}</span></div>
+          <div class="draft-body">${esc(d.text)}</div></div>`).join("");
     return;
   }
   if(draftsError){ box.innerHTML = `<div class="status">${esc(draftsError)}</div>`; return; }
@@ -819,7 +890,7 @@ async function generate(intent){
   const m = replyTarget();
   if(!m || !intent) return;
   lastIntent = intent;
-  draftsBusy = true; draftsError = ""; currentDrafts = null;
+  draftsBusy = true; draftsError = ""; currentDrafts = null; streamText = "";
   renderDrafts();
   try{
     const sys = baseSystem(m.addr) + "\n" + [
@@ -829,8 +900,13 @@ async function generate(intent){
       "相手の名前は差出人欄から取り、文体に合った敬称を付ける（親しみ・丁寧は「◯◯さま」、ビジネスは「◯◯様」）。",
       "返信の方針: " + (intent.hint || "内容に沿って返す"),
       "",
-      "出力は次の JSON のみ。前置きもコードブロックも付けない。",
-      '{"drafts":[{"tag":"案の性格を4字以内で","text":"本文"},{"tag":"","text":""}]}',
+      "出力は次の形式だけ。前置き・説明・コードブロックは付けない。",
+      "TAG: 案の性格を4字以内",
+      "本文",
+      "%%%",
+      "TAG: 案の性格を4字以内",
+      "本文",
+      "",
       "案は2つ。1つ目は素直な返し、2つ目は少し方針を変えたもの。",
       "各案は署名を除いて8行以内に収める。冗長にしない。"
     ].join("\n");
@@ -840,14 +916,20 @@ async function generate(intent){
       "本文:",
       String(m.body || "").slice(0, 3000)
     ].join("\n");
-    const out = await ai(sys, usr);
-    currentDrafts = (out.drafts || []).slice(0,3).map((d,i) =>
+    let last = 0;
+    const raw = await aiText(sys, usr, t => {
+      streamText = t;
+      const now = Date.now();
+      if(now - last > 90){ last = now; renderDrafts(); }
+    });
+    streamText = "";
+    currentDrafts = parseDrafts(raw).slice(0,3).map((d,i) =>
       ({ tag: d.tag || ("案" + (i+1)), text: ensureSig(polish(d.text, m.addr)) }));
     draftsBusy = false; renderDrafts();
     const sc = $("rdScroll");
     if(sc) sc.scrollTo({ top: 0, behavior: "smooth" });
   }catch(e){
-    draftsBusy = false;
+    draftsBusy = false; streamText = "";
     draftsError = "返信案を作れませんでした。" + e.message;
     banner(draftsError);
     renderDrafts();
@@ -1119,6 +1201,10 @@ function renderSheet(){
       <button class="sh-btn" id="btnTest">確かめる</button></div>
 
     <div class="sh-sec">生成の速さ</div>
+    <div class="sh-row"><div class="k"><div class="n">Anthropic の API キー</div>
+      <div class="d">${settings.apiKey ? "設定済み。アプリから直接呼び出しています（速い・書きながら表示）。" : "未設定。Apps Script 経由で呼び出しています。キーを入れると往復が減り、文字が流れ出します。"}
+このキーはこの端末の中だけに保存されます。共有端末には入れないでください。</div>
+      <input class="sh-in" id="inKey" type="password" value="${esc(settings.apiKey||"")}" placeholder="sk-ant-..." style="margin-top:7px"></div></div>
     <div class="sh-row"><div class="k"><div class="n">${settings.fast ? "速さ優先" : "品質優先"}</div>
       <div class="d">速さ優先にすると軽いモデルに切り替わり、返信案が出るまでの時間が短くなります。文面の練り込みは落ちます。</div></div>
       <button class="sh-btn" id="btnFast">${settings.fast ? "品質優先に戻す" : "速さ優先にする"}</button></div>
@@ -1164,6 +1250,7 @@ function renderSheet(){
   const rerender = () => { flush(); renderSheet(); };
   $("inEp").oninput = e => { settings.endpoint = e.target.value.trim(); save(); };
   $("inTk").oninput = e => { settings.token = e.target.value.trim(); save(); };
+  $("inKey").oninput = e => { settings.apiKey = e.target.value.trim(); save(); };
   $("btnFast").onclick = () => { settings.fast = !settings.fast; flush(); renderSheet(); };
   $("inMemo").oninput = e => { settings.memo = e.target.value; save(); };
   $("btnTest").onclick = async () => {
