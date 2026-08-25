@@ -454,17 +454,19 @@ function renderList(){
 async function open(id){
   const row = threads.find(t => t.id === id);
   if(!row) return;
-  currentId = id; current = null;
-  row.unread = false;                       // 見た目を先に更新
+  currentId = id;
+  row.unread = false;
   document.body.classList.add("reading");
-  renderSidebar(); renderList();
-  $("rdScroll").innerHTML = `<div class="thinking" style="padding:20px 28px"><span class="spin"></span>開いています…</div>`;
-  $("aiBar").hidden = true;
+  // 一覧が持っている分でまず表示する。全文は裏で取りに行く。
+  current = { id: id, subject: row.subject, messages: [{ id: row.msgId || id, from: row.from,
+    addr: row.addr, to: row.to, date: row.date, subject: row.subject, body: row.body || "" }] };
+  renderSidebar(); renderList(); renderReader();
   try{
-    current = await api("thread", { id });   // 裏側が Gmail 側も既読にする
-    renderReader();
+    const full = await api("thread", { id });   // 裏側が Gmail 側も既読にする
+    if(currentId === id){ current = full; renderReader(); }
   }catch(e){
-    $("rdScroll").innerHTML = `<div class="status" style="padding:20px 28px">開けませんでした。${esc(e.message)}</div>`;
+    const box = $("drafts");
+    if(currentId === id && box) box.innerHTML = `<div class="status">全文を取得できませんでした。${esc(e.message)}</div>`;
   }
 }
 
@@ -532,16 +534,25 @@ async function generate(intent){
 
 /* ---------- 読み込み ---------- */
 async function load(){
-  loading = true; renderSidebar(); renderList();
+  const key = "cache." + currentBox;
+  threads = [];
+  // 前回の一覧をすぐ出して、裏で最新に差し替える。
+  if(!query){
+    const raw = store.get(key);
+    if(raw){ try { threads = JSON.parse(raw) || []; } catch(e){} }
+  }
+  loading = !threads.length;
+  renderSidebar(); renderList();
   try{
-    const r = await api("threads", { box: currentBox, query, limit: 40 });
+    const r = await api("threads", { box: currentBox, query, limit: 25 });
     threads = r.threads || [];
+    if(!query) store.set(key, JSON.stringify(threads));
     banner(connected() ? "" : "ウェブアプリが未接続です。設定からURLと合言葉を入れてください。（いまは見本を表示しています）");
   }catch(e){
-    threads = [];
-    banner("受信できませんでした。" + e.message);
+    if(!threads.length) banner("受信できませんでした。" + e.message);
   }finally{
-    loading = false; renderSidebar(); renderList(); renderReader();
+    loading = false; renderSidebar(); renderList();
+    if(!currentId) renderReader();
   }
 }
 
