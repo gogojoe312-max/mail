@@ -109,6 +109,10 @@ input,textarea{font-family:inherit;font-size:inherit;color:inherit}
 .rd-body{padding:16px 28px;font-size:13.5px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;max-width:760px}
 .rd-sep{margin:0 28px;border-top:1px dashed var(--hairline);padding-top:4px}
 .rd-older{margin:18px 28px 0;padding-top:10px;border-top:1px solid var(--hairline);font-size:11px;font-weight:600;color:var(--text-3)}
+.rd-snippet{padding:2px 28px 12px;font-size:12.5px;color:var(--text-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.quote-toggle{margin:0 28px 12px;height:24px;padding:0 11px;border:1px solid var(--hairline);border-radius:12px;font-size:12px;color:var(--text-2);background:var(--fill)}
+.quote-toggle:hover{color:var(--text)}
+.rd-quote{margin:0 28px 16px;padding:2px 0 2px 12px;border-left:2px solid var(--hairline);font-size:12.5px;line-height:1.5;white-space:pre-wrap;color:var(--text-2);overflow-wrap:anywhere;max-width:760px}
 button.rd-meta{background:none;border:0;padding:0;cursor:pointer}
 button.rd-meta:hover .rd-to{color:var(--accent)}
 
@@ -191,7 +195,8 @@ button.rd-meta:hover .rd-to{color:var(--accent)}
   body.reading #list{display:none}
   body.reading #reader{display:flex}
   .back-btn{display:flex}
-  .rd-head,.rd-body,.drafts{padding-left:18px;padding-right:18px}
+  .rd-head,.rd-body,.drafts,.rd-snippet{padding-left:18px;padding-right:18px}
+  .rd-older,.quote-toggle,.rd-quote{margin-left:18px;margin-right:18px}
   .rd-sep{margin:0 18px}
   .ai-bar,#dock{padding-left:13px;padding-right:13px}
 }
@@ -561,6 +566,7 @@ const MAILBOXES = [
 let threads = [], currentBox = "INBOX", currentId = null, current = null, query = "", loading = false;
 let lastIntent = null, lastGenerated = "";
 let currentDrafts = null, draftsBusy = false, draftsError = "";
+let openMsgs = {};   // メールごとの開閉。既定は最新だけ開く。
 
 /* ---------- 部品 ---------- */
 const ICONS = {
@@ -633,6 +639,7 @@ async function open(id){
   currentId = id;
   row.unread = false;
   currentDrafts = null; draftsBusy = false; draftsError = "";
+  openMsgs = {};
   dockForceNew = false;
   document.body.classList.add("reading");
   // 一覧が持っている分でまず表示する。全文は裏で取りに行く。
@@ -668,18 +675,41 @@ function renderReader(){
   scroll.innerHTML = `
     <div class="rd-head"><div class="rd-subj">${esc(current.subject)}</div></div>
     <div class="drafts" id="drafts"></div>` +
-    msgs.map((m,i) => `
+    msgs.map((m,i) => {
+      const open = (i === 0) ? openMsgs[m.id] !== false : openMsgs[m.id] === true;
+      const p = splitQuote(m.body);
+      return `
       ${i === 1 ? `<div class="rd-older">以前のやり取り</div>` : (i ? `<div class="rd-sep"></div>` : "")}
       <div class="rd-head" style="border-bottom:0;padding-top:${i?14:16}px;padding-bottom:0">
-        <button class="rd-meta" data-people="${i}" style="margin-top:0;width:100%;text-align:left">
+        <div class="rd-meta" data-msg="${i}" style="margin-top:0;width:100%;text-align:left">
           <span class="avatar">${esc(String(m.from||"?").trim().charAt(0))}</span>
           <span class="rd-who"><span class="rd-name">${esc(m.from)}${MINE.test(m.addr||"") ? "（自分）" : ""}</span>
-            <span class="rd-to">宛先: ${esc(recipientSummary(m))} ›</span></span>
+            <span class="rd-to" data-people="${i}">宛先: ${esc(recipientSummary(m))} ›</span></span>
           <span class="rd-date">${esc(m.date)}</span>
-        </button></div>
-      <div class="rd-body">${esc(m.body)}</div>`).join("");
-  scroll.querySelectorAll("[data-people]").forEach(b =>
-    b.onclick = () => openPeople(msgs[+b.dataset.people]));
+        </div></div>` +
+      (open
+        ? `<div class="rd-body">${esc(p.main)}</div>` +
+          (p.quote ? `<button class="quote-toggle" data-q="${i}">･･･ 引用を表示</button>
+             <div class="rd-quote" id="q${i}" hidden>${esc(p.quote)}</div>` : "")
+        : `<div class="rd-snippet">${esc(p.main.replace(/\s+/g," ").slice(0,90))}</div>`);
+    }).join("");
+
+  scroll.querySelectorAll("[data-msg]").forEach(el =>
+    el.onclick = () => {
+      const i = +el.dataset.msg, id = msgs[i].id;
+      const open = (i === 0) ? openMsgs[id] !== false : openMsgs[id] === true;
+      openMsgs[id] = !open;
+      renderReader();
+    });
+  scroll.querySelectorAll("[data-people]").forEach(el =>
+    el.onclick = (e) => { e.stopPropagation(); openPeople(msgs[+el.dataset.people]); });
+  scroll.querySelectorAll("[data-q]").forEach(b =>
+    b.onclick = (e) => {
+      e.stopPropagation();
+      const q = $("q" + b.dataset.q);
+      q.hidden = !q.hidden;
+      b.textContent = q.hidden ? "･･･ 引用を表示" : "引用を隠す";
+    });
   renderChips();
   renderDrafts();
   updateDock();
@@ -702,6 +732,22 @@ function replyTarget(){
     if(!MINE.test(m[i].addr || "")) return m[i];
   }
   return null;   // 全部自分の送信なら返信案は出さない
+}
+
+// 引用部分を本文から切り離す。普通のメーラーと同じく畳んで隠す。
+const QUOTE_START = /^\s*(>|＞)|^\s*[-_]{2,}\s*(Original Message|元のメッセージ|転送されたメッセージ)|^\s*(From|差出人|Sent|送信日時|To|宛先|Cc|Subject|件名)\s*[:：]|wrote:\s*$|^\s*\d{4}年\d{1,2}月\d{1,2}日.*[:：]\s*$/;
+function splitQuote(body){
+  const lines = String(body || "").split("\n");
+  for(let i = 0; i < lines.length; i++){
+    if(QUOTE_START.test(lines[i])){
+      let j = i;
+      while(j > 0 && lines[j-1].trim() === "") j--;   // 直前の空行も引用側へ
+      const main = lines.slice(0, j).join("\n").replace(/\s+$/, "");
+      if(!main.trim()) break;            // 全部が引用なら畳まない
+      return { main, quote: lines.slice(j).join("\n").replace(/\s+$/, "") };
+    }
+  }
+  return { main: String(body || "").replace(/\s+$/, ""), quote: "" };
 }
 
 // 宛先の要約表示
@@ -1186,6 +1232,27 @@ function autoRefresh(){
 document.addEventListener("visibilitychange", () => { if(!document.hidden && connected()) load(); });
 addEventListener("pageshow", () => { if(connected()) load(); });
 autoRefresh();
+
+// 右へスワイプで一覧に戻る
+;(function(){
+  let x0 = null, y0 = 0, t0 = 0;
+  const r = $("reader");
+  r.addEventListener("touchstart", e => {
+    if(e.touches.length !== 1) return;
+    x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; t0 = Date.now();
+  }, { passive:true });
+  r.addEventListener("touchend", e => {
+    if(x0 === null) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - x0, dy = t.clientY - y0;
+    x0 = null;
+    if(dx > 70 && Math.abs(dy) < 60 && Date.now() - t0 < 700 &&
+       document.body.classList.contains("reading")){
+      document.body.classList.remove("reading");
+      updateDock();
+    }
+  }, { passive:true });
+})();
 
 addEventListener("keydown", e => {
   if(e.key === "Escape"){ closeCompose(); closeSheet(); closePeople(); }
