@@ -320,7 +320,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "2026-08-26 09:05";   // 設定の一番下に出る。読み込まれているファイルの確認用。
+const BUILD = "2026-08-26 09:15";   // 設定の一番下に出る。読み込まれているファイルの確認用。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -857,7 +857,7 @@ function renderDrafts(){
   const box = $("drafts");
   if(!box) return;
   if(draftsBusy){
-    const partial = parseDrafts(streamText);
+    const partial = parseDrafts(streamText).slice(0,1);
     box.innerHTML = `<div class="thinking"><span class="spin"></span>「${esc(L().name)}」で返信を書いています…</div>` +
       partial.map((d,i) => `
         <div class="draft"><div class="draft-h"><span class="draft-tag">${esc(d.tag||("案"+(i+1)))}</span></div>
@@ -904,12 +904,9 @@ async function generate(intent){
       "出力は次の形式だけ。前置き・説明・コードブロックは付けない。",
       "TAG: 案の性格を4字以内",
       "本文",
-      "%%%",
-      "TAG: 案の性格を4字以内",
-      "本文",
       "",
-      "案は2つ。1つ目は素直な返し、2つ目は少し方針を変えたもの。",
-      "各案は署名を除いて8行以内に収める。冗長にしない。"
+      "案は1つだけ。方針に沿った最も素直な返しを書く。",
+      "署名を除いて8行以内に収める。冗長にしない。"
     ].join("\n");
     const usr = [
       "差出人: " + (m.from || ""),
@@ -924,7 +921,7 @@ async function generate(intent){
       if(now - last > 90){ last = now; renderDrafts(); }
     });
     streamText = "";
-    currentDrafts = parseDrafts(raw).slice(0,3).map((d,i) =>
+    currentDrafts = parseDrafts(raw).slice(0,1).map((d,i) =>
       ({ tag: d.tag || ("案" + (i+1)), text: ensureSig(polish(d.text, m.addr)) }));
     draftsBusy = false; renderDrafts();
     const sc = $("rdScroll");
