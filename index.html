@@ -478,7 +478,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v27";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v28";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -938,6 +938,7 @@ async function aiTriage(list){
 }
 
 function mergeTodo(fetched){
+  if(!fetched || !fetched.length) return;   // 取得が空のときは何もしない
   const keep = {};
   (settings.todo || []).forEach(t => keep[t.id] = t);
   // 今回取得できたものは状態が確定する。返信済み・対象外になったものは落とす。
@@ -1628,7 +1629,8 @@ async function load(opts){
       }
     }
     if(!query) writeCache(key, raw);
-    threads = boxView(raw);
+    // 取得が空でも画面を空にしない。積み上げてあるものを出す。
+    threads = query ? boxView(raw) : boxView(readCache(key));
     renderFilters();
     banner(connected() ? "" : "ウェブアプリが未接続です。設定からURLと合言葉を入れてください。（いまは見本を表示しています）");
   }catch(e){
@@ -1705,6 +1707,7 @@ function readCache(key){
 // 取ったものを積み上げる。普通のメーラーと同じで、一度見たものは消えない。
 function writeCache(key, fresh){
   if(key === "cache.TODO") return;          // 要返信は mergeTodo が持つ
+  if(!fresh || !fresh.length) return;       // 空の取得は無視する
   try{
     const old = readCache(key);
     const seen = {}, out = [];
