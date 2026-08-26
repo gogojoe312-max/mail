@@ -478,7 +478,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v40";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v41";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -1651,7 +1651,7 @@ async function load(opts){
       const box = currentBox === "TODO" ? "INBOX" : currentBox;
       const r = await api("threads", { box, query, all: !!query,
         full: currentBox === "WAIT",   // 相手の返信も含めた最後の1通が要る
-        limit: currentBox === "TODO" ? 20 : 15 });
+        limit: currentBox === "TODO" ? 25 : (currentBox === "WAIT" ? 30 : 15) });
       raw = r.threads || [];
       if(box === "INBOX" && !query){
         inboxAll = raw;
