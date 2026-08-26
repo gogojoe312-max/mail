@@ -478,7 +478,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v39";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v40";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -1648,7 +1648,7 @@ async function load(opts){
         to: d.to, cc: d.cc, subject: d.subject, date: d.date, body: d.body, unread: false
       }));
     } else {
-      const box = currentBox === "TODO" ? "INBOX" : (currentBox === "WAIT" ? "SENT" : currentBox);
+      const box = currentBox === "TODO" ? "INBOX" : currentBox;
       const r = await api("threads", { box, query, all: !!query,
         full: currentBox === "WAIT",   // 相手の返信も含めた最後の1通が要る
         limit: currentBox === "TODO" ? 20 : 15 });
@@ -1714,7 +1714,7 @@ function dropFromCaches(id){
 async function loadMore(){
   const b = $("btnMore");
   const scanning = (currentBox === "TODO" || currentBox === "WAIT");
-  const box = currentBox === "TODO" ? "INBOX" : (currentBox === "WAIT" ? "SENT" : currentBox);
+  const box = currentBox === "TODO" ? "INBOX" : currentBox;
   const before = threads.length;
   if(b){ b.textContent = "調べています…"; b.disabled = true; }
   try{
