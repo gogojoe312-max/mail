@@ -369,7 +369,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v6";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v7";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -487,7 +487,7 @@ function polish(body, counterpart){
 }
 
 /* ---------- 保存 ---------- */
-const KEY = "mailai.v1", SCHEMA = 11;
+const KEY = "mailai.v1", SCHEMA = 12;
 const store = (() => {
   let ok = false;
   try { localStorage.setItem("_t","1"); localStorage.removeItem("_t"); ok = true; } catch(e){}
@@ -532,6 +532,12 @@ function migrate(raw){
   }
   if(v < 10){ d.rev = d.rev || 0; }
   if(v < 11){ if(!d.draft || typeof d.draft !== "object") d.draft = null; }
+  if(v < 12){
+    if(!d.tone || typeof d.tone !== "object") d.tone = {};
+    if(!d.triage || typeof d.triage !== "object") d.triage = {};
+    if(typeof d.aiTriage !== "boolean") d.aiTriage = true;
+    if(typeof d.preflight !== "boolean") d.preflight = true;
+  }
   d.schema = SCHEMA;
   if(!Array.isArray(d.intents) || !d.intents.length) d.intents = DEFAULT_INTENTS.slice();
   if(!LEVELS[d.level]) d.level = "mid";
@@ -541,7 +547,8 @@ function migrate(raw){
 let settings = migrate(store.get(KEY)) || {
   schema: SCHEMA, level:"mid", memo:"", endpoint:"", token:"", fast:false, apiKey:"",
   terms: DEFAULT_TERMS.slice(), intents: DEFAULT_INTENTS.slice(), done: {}, todo: [],
-  samples: {}, edits: [], rev: 0, draft: null
+  samples: {}, edits: [], rev: 0, draft: null,
+  tone: {}, triage: {}, aiTriage: true, preflight: true
 };
 
 let saveTimer = null;
@@ -764,13 +771,63 @@ function addressedToMe(t){
   return (to.length + cc.length) <= 4;     // 宛先が少人数なら個別のやり取りとみなす
 }
 function needsReply(t){
-  return !MINE.test(t.addr || "") && addressedToMe(t) && !settings.done[doneKey(t)];
+  if(MINE.test(t.addr || "")) return false;
+  if(settings.done[doneKey(t)]) return false;
+  const judged = (settings.triage || {})[t.msgId];
+  if(judged !== undefined) return judged === 1;   // AIの判定があればそちらを使う
+  return addressedToMe(t);
 }
 // 要返信は端末に貯める。取得できた範囲の外に出ても消えないようにする。
+// 相手ごとの文体を覚える。開いた瞬間にその相手の温度に切り替わる。
+function toneFor(addr){
+  const k = String(addr || "").toLowerCase();
+  return (settings.tone || {})[k] || null;
+}
+function rememberTone(addr, level){
+  const k = String(addr || "").toLowerCase();
+  if(!k || !level) return;
+  settings.tone = settings.tone || {};
+  if(settings.tone[k] === level) return;
+  settings.tone[k] = level;
+  const keys = Object.keys(settings.tone);
+  if(keys.length > 200) keys.slice(0, keys.length - 200).forEach(x => delete settings.tone[x]);
+  flush();
+}
+
 function slimThread(t){
   return { id:t.id, msgId:t.msgId, from:t.from, addr:t.addr, subject:t.subject,
            date:t.date, body:t.body, toAll:t.toAll, ccAll:t.ccAll, unread:t.unread };
 }
+// 規則だけでは拾いきれないので、AIに本文を読ませて返事が要るかを判定する。
+// 判定した結果は覚えておき、同じメールを二度は見ない。
+async function aiTriage(list){
+  if(!settings.aiTriage || !settings.apiKey) return;
+  const box = settings.triage || (settings.triage = {});
+  const pending = list.filter(t => box[t.msgId] === undefined).slice(0, 20);
+  if(!pending.length) return;
+  const sys = [
+    "受け取ったメールが「高崎晟本人の返事を必要としているか」を判定する。",
+    "返事が要る: 質問されている、依頼されている、可否や日程の回答を求められている、確認を頼まれている。",
+    "返事が不要: 報告や共有だけ、一斉配信、自動送信、案内、Ccで回ってきただけのもの、すでに話が完結しているもの。",
+    "宛先の人数は判断材料にしてよいが、名指しで問われていれば人数が多くても返事が要る。",
+    "",
+    "出力は番号だけをカンマ区切りで並べる。返事が要るものの番号のみ。ひとつも無ければ none とだけ書く。",
+    "説明や前置きは一切書かない。"
+  ].join("\n");
+  const usr = pending.map((t,i) =>
+    [ "#" + i, "差出人: " + (t.from||""), "件名: " + (t.subject||""),
+      "本文: " + String(t.body||"").slice(0,220) ].join("\n")).join("\n---\n");
+  try{
+    const raw = await aiText(sys, usr, null, 200);
+    const hit = {};
+    String(raw).replace(/\d+/g, n => { hit[+n] = 1; return n; });
+    pending.forEach((t,i) => { box[t.msgId] = hit[i] ? 1 : 0; });
+    const keys = Object.keys(box);
+    if(keys.length > 400) keys.slice(0, keys.length - 400).forEach(k => delete box[k]);
+    flush();
+  }catch(e){}
+}
+
 function mergeTodo(fetched){
   const keep = {};
   (settings.todo || []).forEach(t => keep[t.id] = t);
@@ -999,6 +1056,8 @@ async function open(id){
   currentDrafts = null; draftsBusy = false; draftsError = "";
   openMsgs = {};
   dockForceNew = false;
+  const tone = toneFor(row.addr);           // その相手に前回使った文体へ
+  if(tone && tone !== settings.level){ settings.level = tone; flush(); refreshSegs(); }
   document.body.classList.add("reading");
   // 一覧が持っている分でまず表示する。全文は裏で取りに行く。
   current = { id: id, subject: row.subject, messages: [{ id: row.msgId || id, from: row.from,
@@ -1171,7 +1230,14 @@ function renderDrafts(){
     box.innerHTML = `<div class="thinking"><span class="spin"></span>「${esc(L().name)}」で返信を書いています…</div>` +
       partial.map((d,i) => `
         <div class="draft"><div class="draft-h"><span class="draft-tag">${esc(d.tag||("案"+(i+1)))}</span></div>
-          <div class="draft-body">${esc(d.text)}</div></div>`).join("");
+          <div class="draft-body">${esc(d.text)}</div>
+      <div class="draft-h" style="border-top:1px solid var(--hairline-soft);border-bottom:0">
+        <button class="chip" data-fix="もっと短く">短く</button>
+        <button class="chip" data-fix="もっと丁寧に">丁寧に</button>
+        <button class="chip" data-fix="もう少し砕けた調子に">砕けて</button>
+        <button class="chip" data-fix="要点を箇条書きにせず、自然な文章に">文章に</button>
+      </div></div>`).join("");
+  box.querySelectorAll("[data-fix]").forEach(b => b.onclick = () => refine(b.dataset.fix));
     return;
   }
   if(draftsError){ box.innerHTML = `<div class="status">${esc(draftsError)}</div>`; return; }
@@ -1273,7 +1339,14 @@ async function load(){
     const box = currentBox === "TODO" ? "INBOX" : currentBox;
     const r = await api("threads", { box, query, all: !!query, limit: currentBox === "TODO" ? 50 : 25 });
     const all = r.threads || [];
-    if(box === "INBOX"){ inboxAll = all; if(!query) mergeTodo(all); }
+    if(box === "INBOX"){
+      inboxAll = all;
+      if(!query){
+        mergeTodo(all);
+        aiTriage(all).then(() => { mergeTodo(all); renderFilters();
+          if(currentBox === "TODO"){ threads = (settings.todo||[]).slice(); renderList(); } });
+      }
+    }
     threads = currentBox === "TODO" ? (settings.todo || []).slice() : all;
     if(!query && currentBox !== "TODO") store.set(key, JSON.stringify(threads));
     renderFilters();
@@ -1342,12 +1415,47 @@ async function composeFromBrief(brief){
   };
 }
 
+// いま出ている案に重ねて指示する
+async function refine(instruction){
+  const m = replyTarget();
+  const d = currentDrafts && currentDrafts[0];
+  if(!m || !d || !instruction) return;
+  draftsBusy = true; draftsError = ""; streamText = ""; renderDrafts();
+  try{
+    const sys = baseSystem(m.addr) + styleBlock(await samplesFor(m.addr)) + "\n" + [
+      "",
+      "いま高崎に見せている返信案を、指示にしたがって直す。",
+      "内容の骨子は保ち、指示された点だけを変える。",
+      "出力は次の形式だけ。前置き・説明は付けない。",
+      "TAG: 案の性格を4字以内",
+      "本文"
+    ].join("\n");
+    const usr = ["いまの案:", d.text, "", "直しの指示: " + instruction].join("\n");
+    let last = 0;
+    const raw = await aiText(sys, usr, t => {
+      streamText = t;
+      const now = Date.now();
+      if(now - last > 90){ last = now; renderDrafts(); }
+    });
+    streamText = "";
+    const got = parseDrafts(raw)[0];
+    if(got) currentDrafts = [{ tag: got.tag || "直し", text: ensureSig(polish(got.text, m.addr)) }];
+  }catch(e){
+    draftsError = "直せませんでした。" + e.message;
+    banner(draftsError);
+  }finally{
+    draftsBusy = false; streamText = ""; renderDrafts();
+  }
+}
+
 async function quick(){
   const brief = dkIn.value.trim();
   if(!brief){ dkIn.focus(); return; }
   if(dockMode() === "reply"){
     dkIn.value = ""; autogrow();
-    await generate({ id:"free", label:"指示", hint: brief });
+    // すでに案が出ていれば、作り直さずにその案を直す
+    if(currentDrafts && currentDrafts.length) await refine(brief);
+    else await generate({ id:"free", label:"指示", hint: brief });
     return;
   }
   $("dkGo").disabled = true;
@@ -1546,6 +1654,39 @@ async function redo(){
   }catch(e){ $("cpHint").textContent = e.message; }
 }
 
+// 送る前の点検。答え漏れ・日付の矛盾・添付の言い忘れ・表記ゆれを見る。
+let skipCheckUntil = 0;
+async function preflight(body, to){
+  if(!settings.preflight || !settings.apiKey) return [];
+  const src = composeSource && composeSource.msg;
+  const terms = (settings.terms || []).map(x => "・" + x.from + " → " + x.to).join("\n");
+  const sys = [
+    "これから送るメールを送信前に点検する。指摘は事実に基づくものだけ。推測で書かない。",
+    "見る点:",
+    "1. 相手が尋ねた点・依頼した点に答え漏れがないか（元のメールが渡されている場合のみ）",
+    "2. 日付・曜日・時刻・人数が、元のメールの内容と食い違っていないか",
+    "3. 本文で添付やファイルに触れているのに、実際には添付がない",
+    "4. 社内の略称や通称が、正式名称に直っていない",
+    "5. 人名・曲名・社名の表記が、元のメールでの書き方と食い違っている",
+    terms ? "正式名称の対応:\n" + terms : "",
+    "",
+    "添付の有無: " + (composeFiles.length ? composeFiles.map(f => f.name).join(", ") : "なし"),
+    "",
+    "出力は問題点だけを1行ずつ、最大3件。各行30字以内。",
+    "問題がなければ ok とだけ書く。前置きや説明は書かない。"
+  ].filter(Boolean).join("\n");
+  const usr = [
+    src ? "元のメール:\n" + String(src.body || "").slice(0, 1500) : "（新規メール）",
+    "", "送ろうとしている本文:", body
+  ].join("\n");
+  try{
+    const raw = await aiText(sys, usr, null, 300);
+    const lines = String(raw).split("\n").map(x => x.replace(/^[-・\d.\s]+/, "").trim())
+      .filter(x => x && !/^ok$/i.test(x));
+    return lines.slice(0, 3);
+  }catch(e){ return []; }
+}
+
 // 送信は5秒待ってから実際に飛ばす。その間は取り消せる。
 let pendingSend = null;
 function cancelSend(){
@@ -1557,8 +1698,21 @@ function cancelSend(){
   banner("");
   openCompose(d);
 }
-$("cpSend").onclick = () => {
+$("cpSend").onclick = async () => {
   if(!$("cpTo").value.trim()){ $("cpHint").textContent = "宛先が空です"; return; }
+
+  // 直前に点検で止めた場合は、次の押下では素通しする
+  if(Date.now() > skipCheckUntil && settings.preflight && settings.apiKey){
+    $("cpHint").textContent = "点検しています…";
+    const issues = await preflight($("cpBody").value, $("cpTo").value);
+    if(issues.length){
+      skipCheckUntil = Date.now() + 120000;
+      $("cpHint").textContent = "点検: " + issues.join(" ／ ") + "　もう一度押すとこのまま送ります";
+      return;
+    }
+  }
+  skipCheckUntil = 0;
+  $("cpHint").textContent = "";
   const payload = {
     threadId: composeThread, all: composeAll, to: $("cpTo").value, cc: $("cpCc").value,
     subject: $("cpSubj").value, body: $("cpBody").value, signature: SIGNATURE,
@@ -1598,6 +1752,7 @@ $("cpSend").onclick = () => {
         ? await api("forward", { msgId: fwdId, to: payload.to, cc: payload.cc, note: payload.body })
         : await api("send", payload);
       rememberEdit(to, gen, sent);
+      rememberTone(to, settings.level);
       if(thread) dropTodo(thread);
       renderFilters();
       banner("送信しました" + (r.from ? "（差出人: " + r.from + "）" : ""));
@@ -1715,6 +1870,15 @@ ${settings.apiKey ? `保存されている値: ${settings.apiKey.length}文字 /
       <div class="d">毎回の生成に足したいこと。例：社名は正式名称で書く／時間は24時間表記</div>
       <textarea class="sh-in" id="inMemo" rows="2" style="margin-top:7px">${esc(settings.memo||"")}</textarea></div></div>
 
+    <div class="sh-sec">AI の働き</div>
+    <div class="sh-row"><div class="k"><div class="n">${settings.aiTriage ? "要返信をAIが判定" : "要返信を規則で判定"}</div>
+      <div class="d">本文を読んで「返事が要るか」を判断します。切ると、宛先と書き出しだけで判定します。</div></div>
+      <button class="sh-btn" id="btnTriage">${settings.aiTriage ? "規則にする" : "AIにする"}</button></div>
+    <div class="sh-row"><div class="k"><div class="n">${settings.preflight ? "送る前に点検する" : "点検しない"}</div>
+      <div class="d">答え漏れ・日付の食い違い・添付の言い忘れ・表記ゆれを送信前に見ます。
+指摘が出たら止まり、もう一度押すとそのまま送ります。</div></div>
+      <button class="sh-btn" id="btnPre">${settings.preflight ? "やめる" : "する"}</button></div>
+
     <div class="sh-sec">書き方の学習</div>
     <div class="sh-row"><div class="k"><div class="n">手本 ${Object.keys(settings.samples||{}).length}件 ／ 直しの記録 ${(settings.edits||[]).length}件</div>
       <div class="d">相手ごとに過去の送信メールを手本として覚え、生成に使います。生成案を直して送ると、その差分も覚えます。
@@ -1747,6 +1911,8 @@ ${settings.apiKey ? `保存されている値: ${settings.apiKey.length}文字 /
   const rerender = () => { flush(); renderSheet(); };
   $("inEp").oninput = e => { settings.endpoint = e.target.value.trim(); save(); };
   $("inTk").oninput = e => { settings.token = e.target.value.trim(); save(); };
+  $("btnTriage").onclick = () => { settings.aiTriage = !settings.aiTriage; flush(); renderSheet(); };
+  $("btnPre").onclick = () => { settings.preflight = !settings.preflight; flush(); renderSheet(); };
   $("btnForget").onclick = () => { settings.samples = {}; settings.edits = []; flush(); renderSheet(); };
   $("inKey").oninput = e => { settings.apiKey = e.target.value.replace(/\s+/g, ""); save(); };
   $("btnFast").onclick = () => { settings.fast = !settings.fast; flush(); renderSheet(); };
