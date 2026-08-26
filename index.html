@@ -478,7 +478,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v37";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v38";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -1008,8 +1008,10 @@ async function pullState(){
     const rs = JSON.parse(r.state);
     if(!rs || typeof rs !== "object") return;
     if((rs.rev || 0) <= (settings.rev || 0)) return;   // こちらの方が新しければ触らない
-    settings.done = Object.assign({}, rs.done || {}, settings.done || {});
-    settings.waitDone = Object.assign({}, rs.waitDone || {}, settings.waitDone || {});
+    // 新しい方をそのまま採る。足し合わせると、片方で消したものが
+    // もう片方の古い記録で復活してしまう。
+    settings.done = rs.done || {};
+    settings.waitDone = rs.waitDone || {};
     settings.todo = (rs.todo || []).filter(t => !settings.done[doneKey(t)]);
     if(Array.isArray(rs.edits) && rs.edits.length) settings.edits = rs.edits;
     settings.rev = rs.rev || 0;
