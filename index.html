@@ -80,9 +80,16 @@ input,textarea{font-family:inherit;font-size:inherit;color:inherit}
 .search input{flex:1;border:0;background:none;outline:none;font-size:12px;min-width:0}
 .search .icon{width:13px;height:13px}
 .list-scroll{flex:1;min-width:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain}
-.filters{flex:0 0 auto;display:flex;flex-wrap:wrap;gap:7px;padding:8px 12px;
-  border-bottom:1px solid var(--hairline);background:var(--pane-bg)}
-.filters .chip{flex:0 0 auto;touch-action:manipulation}
+.pane-top .chips{flex:1 1 auto;min-width:0;display:flex;gap:7px;overflow-x:auto;overflow-y:hidden;
+  padding:0 2px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.pane-top .chips::-webkit-scrollbar{display:none}
+.pane-top .chips .chip{flex:0 0 auto}
+.chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+.search-over{position:absolute;left:8px;right:8px;top:50%;transform:translateY(-50%);
+  display:flex;align-items:center;gap:8px;height:40px;padding:0 12px;border-radius:20px;
+  background:var(--fill);z-index:5}
+.search-over input{flex:1;min-width:0;border:0;background:none;color:var(--text);outline:none}
+.pane-top{position:relative}
 .filters .chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
 .pull{flex:0 0 auto;display:flex;align-items:center;justify-content:center;height:30px;
   font-size:12px;color:var(--text-3);background:var(--pane-bg)}
@@ -287,6 +294,7 @@ button.rd-meta:hover .rd-to{color:var(--accent)}
 .rd-name{font-size:calc(15px * var(--fs))}
 .rd-to,.rd-date{font-size:calc(12.5px * var(--fs))}
 .rd-body{font-size:calc(15px * var(--fs));line-height:1.7}
+.rd-body a{color:var(--accent);text-decoration:underline;overflow-wrap:anywhere}
 .rd-snippet{font-size:calc(13px * var(--fs))}
 .rd-quote{font-size:calc(13px * var(--fs));line-height:1.6}
 .draft-body{font-size:calc(14.5px * var(--fs));line-height:1.65}
@@ -318,21 +326,27 @@ button.rd-meta:hover .rd-to{color:var(--accent)}
       <button class="tb-btn" id="btnRefresh" title="受信" aria-label="受信">
         <svg class="icon" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 5v6h-6"/></svg>
       </button>
-      <div class="search">
-        <svg class="icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-        <input id="q" type="search" placeholder="検索" aria-label="メールを検索">
+      <div class="chips" id="filters">
+        <button class="chip" id="fInbox">受信</button>
+        <button class="chip" id="fTodo">要返信</button>
+        <button class="chip" id="fWait">返事待ち</button>
+        <button class="chip" id="fSent">送信済み</button>
+        <button class="chip" id="fDrafts">下書き</button>
+        <button class="chip" id="fPick">選択</button>
       </div>
+      <button class="tb-btn" id="btnSearch" title="検索" aria-label="検索">
+        <svg class="icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      </button>
       <button class="tb-btn" id="btnSettings" title="設定" aria-label="設定">
         <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1v.2a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-2.8-1.1l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.6 1.6 0 0 0 3.5 15H3.3a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 4.6 8.3l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 2.7-1.1V4.2a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 2.8 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0 1.1 2.7h.2a2 2 0 1 1 0 4h-.2z"/></svg>
       </button>
-    </div>
-    <div class="filters">
-      <button class="chip" id="fInbox">受信</button>
-      <button class="chip" id="fTodo">要返信</button>
-      <button class="chip" id="fWait">返事待ち</button>
-      <button class="chip" id="fSent">送信済み</button>
-      <button class="chip" id="fDrafts">下書き</button>
-      <button class="chip" id="fPick">選択</button>
+      <div class="search-over" id="searchBox" hidden>
+        <svg class="icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="q" type="search" placeholder="すべてのメールを検索" aria-label="メールを検索">
+        <button class="tb-btn" id="btnSearchClose" aria-label="検索を閉じる">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+      </div>
     </div>
     <div class="bulk" id="bulk" hidden>
       <span id="bulkN">0件</span>
@@ -463,7 +477,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v25";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v26";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -1000,6 +1014,15 @@ const ICONS = {
   box:'<rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>',
   trash:'<path d="M4 7h16"/><path d="M9 7V5h6v2"/><path d="M6 7v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7"/>'
 };
+// 本文中の URL を押せるようにする
+function linkify(t){
+  return esc(t).replace(/(https?:\/\/[^\s<>"'）】」]+)/g, (m) => {
+    const clean = m.replace(/[.,、。）]+$/, "");
+    const tail = m.slice(clean.length);
+    return `<a href="${clean}" target="_blank" rel="noopener noreferrer">${clean}</a>` + tail;
+  });
+}
+
 const fileSize = n => n > 1048576 ? (n/1048576).toFixed(1) + "MB"
   : n > 1024 ? Math.round(n/1024) + "KB" : (n || 0) + "B";
 const esc = s => String(s === null || s === undefined ? "" : s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -1027,6 +1050,17 @@ function onLevelChanged(){
   if(currentDrafts && lastIntent) generate(lastIntent);
 }
 
+// 横に流れる帯の中でも、指が動いていなければ確実に反応させる
+function tapOnly(el, fn){
+  let x0 = 0, y0 = 0, moved = false;
+  el.addEventListener("pointerdown", e => { x0 = e.clientX; y0 = e.clientY; moved = false; });
+  el.addEventListener("pointermove", e => {
+    if(Math.abs(e.clientX - x0) > 8 || Math.abs(e.clientY - y0) > 8) moved = true;
+  });
+  el.addEventListener("pointerup", e => { if(!moved) fn(e); });
+  el.addEventListener("click", e => e.preventDefault());
+}
+
 function renderFilters(){
   const n = (settings.todo || []).length;
   $("fInbox").setAttribute("aria-pressed", currentBox === "INBOX");
@@ -1040,11 +1074,11 @@ function renderFilters(){
   $("bulk").hidden = !picking;
   $("bulkN").textContent = sel + "件";
 }
-$("fInbox").onclick = () => switchBox("INBOX");
-$("fTodo").onclick  = () => switchBox("TODO");
-$("fWait").onclick = () => switchBox("WAIT");
-$("fSent").onclick = () => switchBox("SENT");
-$("fDrafts").onclick = () => switchBox("DRAFTS2");
+tapOnly($("fInbox"), () => switchBox("INBOX"));
+tapOnly($("fTodo"), () => switchBox("TODO"));
+tapOnly($("fWait"), () => switchBox("WAIT"));
+tapOnly($("fSent"), () => switchBox("SENT"));
+tapOnly($("fDrafts"), () => switchBox("DRAFTS2"));
 
 // 箱を切り替える。読んでいたメールはそのまま残す。
 function switchBox(box){
@@ -1053,7 +1087,7 @@ function switchBox(box){
   picking = false; picked = {};
   load();
 }
-$("fPick").onclick = () => { picking = !picking; picked = {}; renderFilters(); renderList(); };
+tapOnly($("fPick"), () => { picking = !picking; picked = {}; renderFilters(); renderList(); });
 
 // まとめて処理する
 async function bulk(fn, label){
@@ -1335,7 +1369,7 @@ function renderReader(){
           <span class="rd-date">${esc(m.date)}</span>
         </div></div>` +
       (open
-        ? `<div class="rd-body">${esc(p.main)}</div>` +
+        ? `<div class="rd-body">${linkify(p.main)}</div>` +
           ((m.files && m.files.length) ? `<div class="att">${m.files.map((f,k) =>
              `<button data-att="${i}:${k}">📎 ${esc(f.name)}（${fileSize(f.size)}）</button>`).join("")}</div>` : "") +
           (p.quote ? `<button class="quote-toggle" data-q="${i}">･･･ 引用を表示</button>
@@ -1827,10 +1861,43 @@ async function refine(instruction){
   }
 }
 
+// 「◯◯に転送」のような、返信ではない指示を読み取る
+async function readIntent(text){
+  const m = String(text || "");
+  const fwd = m.match(/(.*?)(?:さん|様|さま)?\s*(?:に|へ)\s*(?:この|本件を?)?\s*(?:メールを?)?(?:転送|フォワード|回して|回しといて|共有)/);
+  if(!fwd) return null;
+  const name = fwd[1].replace(/^[\s、,。]+|[\s、,。]+$/g, "").slice(-12);
+  const list = await contacts();
+  let hit = null;
+  if(name){
+    hit = list.find(c => c.name && c.name.indexOf(name) !== -1)
+       || list.find(c => (c.addr || "").toLowerCase().indexOf(name.toLowerCase()) !== -1);
+  }
+  const note = m.replace(fwd[0], "")
+    .replace(/^[\s、,。・]*(?:しといて|してください|して|お願いします|お願い|よろしく)?[\s、,。・]*/, "")
+    .trim();
+  return { action: "forward", to: hit ? hit.addr : "", name, note };
+}
+
 async function quick(){
   const brief = dkIn.value.trim();
   if(!brief){ dkIn.focus(); return; }
   if(dockMode() === "reply"){
+    // 返信ではなく「転送して」などの指示なら、そちらを実行する
+    const intent = await readIntent(brief);
+    if(intent && intent.action === "forward"){
+      const m = lastMsg();
+      if(m){
+        dkIn.value = ""; autogrow();
+        composeMode = "forward"; forwardMsgId = m.id;
+        openCompose({ to: intent.to, cc: "", subject: "Fwd: " + (current.subject || ""),
+          body: intent.note, title: "転送", noQuote: true });
+        $("cpHint").textContent = intent.to
+          ? (intent.name ? intent.name + "さん宛てにしました。確認して送信してください。" : "宛先を入れて送信してください。")
+          : (intent.name ? "「" + intent.name + "」の連絡先が見つかりませんでした。宛先を入れてください。" : "宛先を入れてください。");
+        return;
+      }
+    }
     dkIn.value = ""; autogrow();
     // すでに案が出ていれば、作り直さずにその案を直す
     if(currentDrafts && currentDrafts.length) await refine(brief);
@@ -2397,6 +2464,14 @@ let armedDelete = null, armedTerm = null;
 const openSheet  = () => { renderSheet(); $("sheet").classList.add("on"); $("scrim").classList.add("on"); };
 const closeSheet = () => { armedDelete = null; armedTerm = null; $("sheet").classList.remove("on"); $("scrim").classList.remove("on"); };
 $("btnSettings").onclick = openSheet;
+$("btnSearch").onclick = () => {
+  $("searchBox").hidden = false;
+  $("q").focus();
+};
+$("btnSearchClose").onclick = () => {
+  $("searchBox").hidden = true;
+  if($("q").value){ $("q").value = ""; query = ""; load(); }
+};
 $("shClose").onclick = closeSheet;
 
 function renderSheet(){
