@@ -42,6 +42,7 @@ addEventListener("unhandledrejection", function(e){
   --text:#fff;--text-2:rgba(255,255,255,.6);--text-3:rgba(255,255,255,.4);
   --sel-inactive:rgba(255,255,255,.10);--seg-on:#5a5a5f;}}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+[hidden]{display:none !important}   /* display:flex などに負けないように */
 html,body{height:100%;margin:0}
 @supports (height:100dvh){html,body{height:100dvh}}
 body{font-family:var(--font);font-size:13px;color:var(--text);background:var(--pane-bg);overflow:hidden;
@@ -382,7 +383,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v8";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v9";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
