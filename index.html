@@ -289,7 +289,8 @@ button.rd-meta:hover .rd-to{color:var(--accent)}
 .row .subj{font-size:calc(14px * var(--fs))}
 .row .prev{font-size:calc(13px * var(--fs));line-height:1.45}
 .row .date{font-size:calc(12.5px * var(--fs))}
-.rep{display:inline-block;margin-right:5px;color:var(--accent);font-weight:700}
+.rep{width:15px;height:15px;margin-right:6px;vertical-align:-2px;
+  fill:none;stroke:var(--text-3);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .rd-subj{font-size:calc(19px * var(--fs));line-height:1.35}
 .rd-name{font-size:calc(15px * var(--fs))}
 .rd-to,.rd-date{font-size:calc(12.5px * var(--fs))}
@@ -477,7 +478,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v26";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v27";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -1114,7 +1115,7 @@ async function bulk(fn, label){
           try{ await api("restore", { id: t.id }); }catch(e){}
         } else if(box === "WAIT") delete (settings.waitDone || {})[t.id];
         else delete settings.done[doneKey(t)];
-        putBack(t, box === "WAIT" ? "SENT" : "INBOX");
+        putBack(t, box);
       }
       flush(); pushState();
     });
@@ -1162,7 +1163,7 @@ function renderList(){
   el.innerHTML = threads.map(m => `
     <div class="row ${m.unread?"unread":""}" data-id="${esc(m.id)}" role="option" aria-selected="${m.id===currentId}">
       <span class="dot"></span><span>
-        <span class="r1"><span class="from">${m.replied ? `<span class="rep">↩</span>` : ""}${esc(m.from)}</span><span class="date">${esc(m.date)}</span></span>
+        <span class="r1"><span class="from">${m.replied ? `<svg class="rep" viewBox="0 0 24 24" aria-label="返信済み"><path d="M9 7 4 12l5 5"/><path d="M4 12h9a6 6 0 0 1 6 6v1"/></svg>` : ""}${esc(m.from)}</span><span class="date">${esc(m.date)}</span></span>
         <span class="subj">${esc(m.subject)}</span>
         <span class="prev">${esc(String(m.body||"").replace(/\n+/g," "))}</span>
       </span>
@@ -1220,7 +1221,7 @@ function renderList(){
       else delete settings.done[doneKey(t)];
       flush(); pushState();
       if(box === "TODO") mergeTodo([t]);
-      putBack(t, box === "WAIT" ? "SENT" : "INBOX");
+      putBack(t, box);
     });
   });
 }
@@ -1583,7 +1584,7 @@ async function generate(intent){
 /* ---------- 読み込み ---------- */
 async function load(opts){
   const force = !!(opts && opts.force);
-  const key = "cache." + (currentBox === "WAIT" ? "SENT" : currentBox);
+  const key = "cache." + currentBox;
 
   // 1. まず手元にあるものを出す。切り替えのたびに空にしない。
   threads = boxView(readCache(key));
@@ -1677,9 +1678,10 @@ async function loadMore(){
       settings.scan[box] = start + raw.length;
       flush();
     }
-    if(!query) writeCache("cache." + box, readCache("cache." + box).concat(raw));
+    const ck = "cache." + currentBox;
+    if(!query) writeCache(ck, readCache(ck).concat(raw));
     if(box === "INBOX" && !query) mergeTodo(raw);
-    threads = boxView(readCache("cache." + currentBox));
+    threads = boxView(readCache(ck));
     renderList(); renderFilters();
     const got = threads.length - before;
     banner(scanning
@@ -1731,7 +1733,6 @@ function saveList(key, list){
 // 保存してあるものから、いまの箱で見せるぶんだけを取り出す
 function boxView(list){
   if(currentBox === "TODO") return (settings.todo || []).slice();
-  if(currentBox === "WAIT" && !list.length) list = readCache("cache.SENT");
   if(currentBox === "WAIT"){
     // 送信済みのうち、最後の1通が自分のもの＝相手からまだ返ってきていない
     return (list || []).filter(t => !MINE.test(t.toAll || t.to || "") && !(settings.waitDone || {})[t.id]);
@@ -2064,7 +2065,7 @@ function putBack(t, box){
   const key = "cache." + (box || currentBox);
   const list = readCache(key);
   if(!list.some(x => x.id === t.id)){ list.unshift(t); saveList(key, list.slice(0, 400)); }
-  threads = boxView(readCache("cache." + (currentBox === "WAIT" ? "SENT" : currentBox)));
+  threads = boxView(readCache("cache." + currentBox));
   renderList(); renderFilters();
 }
 
