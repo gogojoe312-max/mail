@@ -432,7 +432,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v16";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v17";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -1516,7 +1516,7 @@ async function load(opts){
   if(!force && !query && threads.length && age < 90000){
     loading = false;
     renderList();
-    if(currentBox === "INBOX") setTimeout(() => prefetchTop(threads), 400);
+    if(currentBox === "INBOX") setTimeout(() => prefetchTop(threads), 1500);
     return;
   }
 
@@ -1532,15 +1532,18 @@ async function load(opts){
     } else {
       const box = currentBox === "TODO" ? "INBOX" : (currentBox === "WAIT" ? "SENT" : currentBox);
       const r = await api("threads", { box, query, all: !!query,
-        limit: currentBox === "TODO" ? 30 : (currentBox === "WAIT" ? 25 : 15) });
+        limit: currentBox === "TODO" ? 20 : 15 });
       raw = r.threads || [];
       if(box === "INBOX" && !query){
         inboxAll = raw;
         mergeTodo(raw);
-        aiTriage(raw).then(() => {
-          mergeTodo(raw); renderFilters();
-          if(currentBox === "TODO"){ threads = boxView([]); renderList(); }
-        });
+        // 判定と先読みは、一覧が出そろってから順に流す。同時に走らせると取得が遅くなる。
+        setTimeout(() => {
+          aiTriage(raw).then(() => {
+            mergeTodo(raw); renderFilters();
+            if(currentBox === "TODO"){ threads = boxView([]); renderList(); }
+          }).then(() => prefetchTop(raw));
+        }, 1200);
       }
     }
     if(!query) writeCache(key, raw);
@@ -1555,7 +1558,6 @@ async function load(opts){
     $("pullHint").hidden = true; $("pullHint").textContent = "引いて更新";
     renderSidebar(); renderList();
     if(!currentId) renderReader();
-    if(currentBox === "INBOX" && !query) setTimeout(() => prefetchTop(threads), 600);
   }
 }
 
