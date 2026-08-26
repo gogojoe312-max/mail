@@ -330,7 +330,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v1";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v2";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -448,7 +448,7 @@ function polish(body, counterpart){
 }
 
 /* ---------- 保存 ---------- */
-const KEY = "mailai.v1", SCHEMA = 7;
+const KEY = "mailai.v1", SCHEMA = 8;
 const store = (() => {
   let ok = false;
   try { localStorage.setItem("_t","1"); localStorage.removeItem("_t"); ok = true; } catch(e){}
@@ -486,6 +486,7 @@ function migrate(raw){
   if(v < 5){ d.fast = !!d.fast; }
   if(v < 6){ d.apiKey = d.apiKey || ""; }
   if(v < 7){ if(!d.done || typeof d.done !== "object") d.done = {}; }
+  if(v < 8){ if(!Array.isArray(d.todo)) d.todo = []; }
   d.schema = SCHEMA;
   if(!Array.isArray(d.intents) || !d.intents.length) d.intents = DEFAULT_INTENTS.slice();
   if(!LEVELS[d.level]) d.level = "mid";
@@ -494,7 +495,7 @@ function migrate(raw){
 
 let settings = migrate(store.get(KEY)) || {
   schema: SCHEMA, level:"mid", memo:"", endpoint:"", token:"", fast:false, apiKey:"",
-  terms: DEFAULT_TERMS.slice(), intents: DEFAULT_INTENTS.slice(), done: {}
+  terms: DEFAULT_TERMS.slice(), intents: DEFAULT_INTENTS.slice(), done: {}, todo: []
 };
 
 let saveTimer = null;
@@ -667,6 +668,30 @@ function addressedToMe(t){
 function needsReply(t){
   return !MINE.test(t.addr || "") && addressedToMe(t) && !settings.done[doneKey(t)];
 }
+// 要返信は端末に貯める。取得できた範囲の外に出ても消えないようにする。
+function slimThread(t){
+  return { id:t.id, msgId:t.msgId, from:t.from, addr:t.addr, subject:t.subject,
+           date:t.date, body:t.body, toAll:t.toAll, ccAll:t.ccAll, unread:t.unread };
+}
+function mergeTodo(fetched){
+  const keep = {};
+  (settings.todo || []).forEach(t => keep[t.id] = t);
+  // 今回取得できたものは状態が確定する。返信済み・対象外になったものは落とす。
+  fetched.forEach(t => {
+    if(needsReply(t)) keep[t.id] = slimThread(t);
+    else delete keep[t.id];
+  });
+  const seen = {}, out = [];
+  fetched.forEach(t => { if(keep[t.id] && !seen[t.id]){ out.push(keep[t.id]); seen[t.id] = 1; } });
+  (settings.todo || []).forEach(t => { if(keep[t.id] && !seen[t.id]){ out.push(keep[t.id]); seen[t.id] = 1; } });
+  settings.todo = out.slice(0, 200);
+  flush();
+}
+function dropTodo(id){
+  settings.todo = (settings.todo || []).filter(t => t.id !== id);
+  flush();
+}
+
 function pruneDone(){
   const keys = Object.keys(settings.done || {});
   if(keys.length > 600) keys.slice(0, keys.length - 400).forEach(k => delete settings.done[k]);
@@ -706,7 +731,7 @@ function onLevelChanged(){
 }
 
 function renderFilters(){
-  const n = (inboxAll || []).filter(needsReply).length;
+  const n = (settings.todo || []).length;
   $("fInbox").setAttribute("aria-pressed", currentBox !== "TODO");
   $("fTodo").setAttribute("aria-pressed", currentBox === "TODO");
   $("fTodo").textContent = n ? "要返信 " + n : "要返信";
@@ -752,7 +777,7 @@ function renderList(){
     const t = threads.find(x => x.id === b.dataset.done);
     if(!t) return;
     settings.done[doneKey(t)] = 1;
-    pruneDone(); flush();
+    pruneDone(); dropTodo(t.id); flush();
     threads = threads.filter(x => x.id !== t.id);
     renderList(); renderFilters();
   });
@@ -996,7 +1021,9 @@ async function load(){
   const key = "cache." + currentBox;
   threads = [];
   // 前回の一覧をすぐ出して、裏で最新に差し替える。
-  if(!query){
+  if(currentBox === "TODO"){
+    threads = (settings.todo || []).slice();   // 保存してあるものを即座に出す
+  } else if(!query){
     const raw = store.get(key);
     if(raw){ try { threads = JSON.parse(raw) || []; } catch(e){} }
   }
@@ -1006,8 +1033,8 @@ async function load(){
     const box = currentBox === "TODO" ? "INBOX" : currentBox;
     const r = await api("threads", { box, query, limit: currentBox === "TODO" ? 50 : 25 });
     const all = r.threads || [];
-    if(box === "INBOX") inboxAll = all;
-    threads = currentBox === "TODO" ? all.filter(needsReply) : all;
+    if(box === "INBOX"){ inboxAll = all; if(!query) mergeTodo(all); }
+    threads = currentBox === "TODO" ? (settings.todo || []).slice() : all;
     if(!query && currentBox !== "TODO") store.set(key, JSON.stringify(threads));
     renderFilters();
     banner(connected() ? "" : "ウェブアプリが未接続です。設定からURLと合言葉を入れてください。（いまは見本を表示しています）");
@@ -1137,6 +1164,7 @@ $("btnArchive").onclick = async () => {
   if(!currentId) return;
   const id = currentId;
   threads = threads.filter(t => t.id !== id);
+  dropTodo(id);
   currentId = null; current = null;
   document.body.classList.remove("reading");
   renderSidebar(); renderList(); renderReader();
@@ -1177,6 +1205,8 @@ $("cpSend").onclick = async () => {
     const r = await api("send", { threadId:composeThread, all:composeAll, to:$("cpTo").value,
       cc:$("cpCc").value, subject:$("cpSubj").value, body:$("cpBody").value, signature:SIGNATURE });
     closeCompose();
+    if(composeThread) dropTodo(composeThread);
+    renderFilters();
     banner("送信しました" + (r.from ? "（差出人: " + r.from + "）" : ""));
     setTimeout(() => banner(""), 4000);
   }catch(e){ $("cpHint").textContent = "送信できませんでした。" + e.message; }
