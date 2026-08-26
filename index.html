@@ -478,7 +478,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v38";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v39";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -1616,9 +1616,13 @@ async function generate(intent){
 }
 
 /* ---------- 読み込み ---------- */
+let loadSeq = 0;   // 同時に走った取得のうち、最後のものだけを採る
 async function load(opts){
   const force = !!(opts && opts.force);
+  const my = ++loadSeq;
+  const box0 = currentBox;
   const key = "cache." + currentBox;
+  const stale = () => my !== loadSeq || currentBox !== box0;
 
   // 1. まず手元にあるものを出す。切り替えのたびに空にしない。
   threads = boxView(readCache(key));
@@ -1661,6 +1665,9 @@ async function load(opts){
         }, 1200);
       }
     }
+    // 箱が変わった、または新しい取得が始まっていたら、この結果は捨てる。
+    // これをしないと、遅れて返ってきた古い取得が今の一覧を壊す。
+    if(stale()) return;
     // 取れたものをそのまま映す。保存の成否に画面を左右させない。
     if(raw.length){
       const fresh = boxView(raw);
@@ -1679,8 +1686,9 @@ async function load(opts){
     banner(connected() ? "" : "ウェブアプリが未接続です。設定からURLと合言葉を入れてください。（いまは見本を表示しています）");
   }catch(e){
     // 失敗しても手元のものは消さない。理由だけ出す。
-    banner("受信できませんでした。" + e.message);
+    if(!stale()) banner("受信できませんでした。" + e.message);
   }finally{
+    if(stale()) return;
     loading = false;
     $("pullHint").hidden = true; $("pullHint").textContent = "引いて更新";
     renderSidebar(); renderList();
