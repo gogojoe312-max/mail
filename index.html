@@ -254,6 +254,8 @@ button.rd-meta:hover .rd-to{color:var(--accent)}
 }
 
 /* ---- 更新中の表示 ---- */
+.rdbusy{display:flex;align-items:center;gap:6px;margin-left:6px;font-size:12px;color:var(--text-3);white-space:nowrap}
+.rdbusy .spin{width:13px;height:13px}
 .busy{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text-3);margin-left:auto}
 .busy .spin{width:13px;height:13px}
 
@@ -319,6 +321,7 @@ button.rd-meta:hover .rd-to{color:var(--accent)}
       <button class="tb-btn" id="btnReplyAll" title="全員に返信" aria-label="全員に返信">
         <svg class="icon" viewBox="0 0 24 24"><path d="M8 7 3 12l5 5"/><path d="M13 7l-5 5 5 5"/><path d="M8 12h7a6 6 0 0 1 6 6v1"/></svg>
       </button>
+      <span class="rdbusy" id="rdBusy" hidden><span class="spin"></span>読み込み中</span>
       <button class="tb-btn" id="btnCal" title="予定にする" aria-label="予定にする">
         <svg class="icon" viewBox="0 0 24 24"><path d="M4 6h16v14H4zM4 10h16M9 3v4M15 3v4"/></svg>
       </button>
@@ -429,7 +432,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v13";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v14";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -1149,12 +1152,14 @@ async function open(id){
     addr: row.addr, to: row.to, date: row.date, subject: row.subject, body: row.body || "" }] };
   // 前に開いたことがあれば、その中身をすぐ出す。裏で最新に差し替える。
   const cached = store.get("th." + id);
+  let hadCache = false;
   if(cached){
     try{
       const c = JSON.parse(cached);
-      if(c && c.messages && c.messages.length) current = c;
+      if(c && c.messages && c.messages.length){ current = c; hadCache = true; }
     }catch(e){}
   }
+  if(!hadCache) rdBusy(true);
   markReadLocal(id);
   renderSidebar(); renderList(); renderReader();
   try{
@@ -1162,11 +1167,31 @@ async function open(id){
     if(currentId === id){ current = full; renderReader(); }
     cacheThread(full);
     markReadLocal(id);
+    rdBusy(false);
   }catch(e){
     // 全文が取れなくても既読だけは付けにいく
     api("read", { id }).catch(() => {});
+    rdBusy(false);
     if(currentId === id) banner("全文を取得できませんでした。" + e.message);
   }
+}
+
+// 一覧を出したあと、上のほうのスレッドを裏で先に取っておく。
+// 開いた瞬間に出したいので、順番に、間を空けて取る。
+let prefetching = false;
+async function prefetchTop(list){
+  if(prefetching || !connected()) return;
+  prefetching = true;
+  try{
+    for(const t of (list || []).slice(0, 6)){
+      if(store.get("th." + t.id)) continue;      // すでに持っていれば飛ばす
+      try{
+        const full = await api("thread", { id: t.id, markRead: false });
+        cacheThread(full);
+      }catch(e){ break; }
+      await new Promise(r => setTimeout(r, 400));
+    }
+  } finally { prefetching = false; }
 }
 
 // 開いたスレッドを端末に置いておく。全部は重いので、直近の数通だけ。
@@ -1192,6 +1217,11 @@ function cacheThread(full){
 
 // 既読を、画面・保存してある一覧・キャッシュのすべてに反映する。
 // どれかが取り残されると、戻ったときに未読へ巻き戻って見える。
+function rdBusy(on){
+  const h = $("rdBusy");
+  if(h) h.hidden = !on;
+}
+
 function markReadLocal(id){
   const t = threads.find(x => x.id === id);
   if(t) t.unread = false;
@@ -1516,6 +1546,7 @@ async function load(){
     $("pullHint").hidden = true; $("pullHint").textContent = "引いて更新";
     renderSidebar(); renderList();
     if(!currentId) renderReader();
+    if(currentBox === "INBOX" && !query) setTimeout(() => prefetchTop(threads), 600);
   }
 }
 
