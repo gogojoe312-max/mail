@@ -478,7 +478,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v32";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v33";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -666,6 +666,24 @@ let settings = migrate(store.get(KEY)) || {
 
 let saveTimer = null;
 const save  = () => { clearTimeout(saveTimer); saveTimer = setTimeout(flush, 400); };
+// 保存の形を変えたときは、古い保存を捨ててやり直す。
+// 混ざったまま使うと、表示が欠けたり順序が壊れたりする。
+const CACHE_VER = "3";
+function resetCachesIfNeeded(){
+  let cur = null;
+  try { cur = localStorage.getItem("mail.cachever"); } catch(e){ return; }
+  if(cur === CACHE_VER) return;
+  try{
+    const drop = [];
+    for(let i = 0; i < localStorage.length; i++){
+      const k = localStorage.key(i);
+      if(k && (k.indexOf("cache.") === 0 || k.indexOf("th.") === 0)) drop.push(k);
+    }
+    drop.forEach(k => localStorage.removeItem(k));
+    localStorage.setItem("mail.cachever", CACHE_VER);
+  }catch(e){}
+}
+
 const applyFs = () => document.documentElement.style.setProperty("--fs", String(settings.fs || 1));
 const flush = () => { clearTimeout(saveTimer); settings.schema = SCHEMA; store.set(KEY, JSON.stringify(settings)); };
 addEventListener("pagehide", flush);
@@ -1747,8 +1765,10 @@ function boxView(list){
     // 裏側が「最新が自分の送信」のものだけを返す。ここでは片付け済みを外すだけ。
     return sortByTime((list || []).filter(t => !(settings.waitDone || {})[t.id]));
   }
-  // 箱をまたいで混ざらないよう、その箱のものだけを出す
-  return sortByTime((list || []).filter(t => !t.box || t.box === currentBox));
+  // 箱をまたいで混ざらないよう、その箱のものだけを出す。
+  // 箱の記録が無いものは古い形式なので出さない（次の取得で入れ替わる）。
+  const kept = (list || []).filter(t => t.box === currentBox);
+  return sortByTime(kept.length ? kept : (list || []).filter(t => !t.box));
 }
 
 /* ---------- 下の欄 ---------- */
@@ -2843,6 +2863,11 @@ addEventListener("keydown", e => {
 
 refreshSegs();
 autogrow();
+resetCachesIfNeeded();
+if(localStorage.getItem("mail.todover") !== CACHE_VER){
+  settings.todo = []; settings.scan = {}; flush();
+  try { localStorage.setItem("mail.todover", CACHE_VER); } catch(e){}
+}
 applyFs();
 updateDock();
 renderFilters();
