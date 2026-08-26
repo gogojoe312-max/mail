@@ -330,7 +330,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v2";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v3";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -448,7 +448,7 @@ function polish(body, counterpart){
 }
 
 /* ---------- 保存 ---------- */
-const KEY = "mailai.v1", SCHEMA = 8;
+const KEY = "mailai.v1", SCHEMA = 9;
 const store = (() => {
   let ok = false;
   try { localStorage.setItem("_t","1"); localStorage.removeItem("_t"); ok = true; } catch(e){}
@@ -487,6 +487,10 @@ function migrate(raw){
   if(v < 6){ d.apiKey = d.apiKey || ""; }
   if(v < 7){ if(!d.done || typeof d.done !== "object") d.done = {}; }
   if(v < 8){ if(!Array.isArray(d.todo)) d.todo = []; }
+  if(v < 9){
+    if(!d.samples || typeof d.samples !== "object") d.samples = {};
+    if(!Array.isArray(d.edits)) d.edits = [];
+  }
   d.schema = SCHEMA;
   if(!Array.isArray(d.intents) || !d.intents.length) d.intents = DEFAULT_INTENTS.slice();
   if(!LEVELS[d.level]) d.level = "mid";
@@ -495,7 +499,8 @@ function migrate(raw){
 
 let settings = migrate(store.get(KEY)) || {
   schema: SCHEMA, level:"mid", memo:"", endpoint:"", token:"", fast:false, apiKey:"",
-  terms: DEFAULT_TERMS.slice(), intents: DEFAULT_INTENTS.slice(), done: {}, todo: []
+  terms: DEFAULT_TERMS.slice(), intents: DEFAULT_INTENTS.slice(), done: {}, todo: [],
+  samples: {}, edits: []
 };
 
 let saveTimer = null;
@@ -584,6 +589,55 @@ async function aiText(system, user, onDelta, maxTokens){
   }
   if(!text) throw new Error("AI の返答が空でした");
   return text;
+}
+
+// 過去に自分が書いた文面を手本として貯める。一度取ったら端末に残し、以後は取りに行かない。
+async function samplesFor(addr){
+  const key = (addr || "*").toLowerCase();
+  const box = settings.samples || (settings.samples = {});
+  if(box[key]) return box[key];
+  try{
+    const r = await api("sent", { addr: addr || "", limit: 3 });
+    box[key] = (r.samples || []).map(x => ({
+      subject: x.subject || "",
+      body: splitQuote(x.body || "").main.slice(0, 700)
+    })).filter(x => x.body.length > 30);
+  }catch(e){
+    box[key] = [];
+  }
+  // 貯めすぎないよう相手は40件まで
+  const keys = Object.keys(box);
+  if(keys.length > 40) keys.slice(0, keys.length - 40).forEach(k => delete box[k]);
+  flush();
+  return box[key];
+}
+
+// 生成案を高崎さんが直して送ったら、その差分を覚えておく
+function rememberEdit(addr, draft, sent){
+  const a = String(draft || "").trim(), b = String(sent || "").trim();
+  if(!a || !b || a === b) return;
+  if(Math.abs(a.length - b.length) < 4 && a.slice(0,40) === b.slice(0,40)) return;  // ほぼ同じなら覚えない
+  const one = { addr: addr || "", draft: a.slice(0, 500), sent: b.slice(0, 500) };
+  settings.edits = (settings.edits || []).concat([one]).slice(-20);
+  flush();
+}
+
+// 手本を指示文に足す
+function styleBlock(samples){
+  const parts = [];
+  if(samples && samples.length){
+    parts.push("");
+    parts.push("過去に高崎本人がこの相手へ送った実物。言い回し・句読点・改行の位置・段落の切り方を、ここから真似る。");
+    parts.push("内容そのものは流用しない。あくまで書き方の手本として使う。");
+    samples.forEach((x, i) => { parts.push("--- 手本" + (i+1), x.body); });
+  }
+  const ed = (settings.edits || []).slice(-3);
+  if(ed.length){
+    parts.push("");
+    parts.push("過去に生成した案を高崎本人が直して送った例。同じ直しを繰り返さないよう、直したあとの書き方に寄せる。");
+    ed.forEach((x, i) => { parts.push("--- 直され" + (i+1), "【案】" + x.draft, "【実際に送った文】" + x.sent); });
+  }
+  return parts.join("\n");
 }
 
 async function ai(system, user, maxTokens){
@@ -996,8 +1050,9 @@ async function generate(intent){
       "本文:",
       String(m.body || "").slice(0, 3000)
     ].join("\n");
+    const sysWithStyle = sys + styleBlock(await samplesFor(m.addr));
     let last = 0;
-    const raw = await aiText(sys, usr, t => {
+    const raw = await aiText(sysWithStyle, usr, t => {
       streamText = t;
       const now = Date.now();
       if(now - last > 90){ last = now; renderDrafts(); }
@@ -1095,7 +1150,7 @@ async function composeFromBrief(brief){
     '{"to":"","cc":"","subject":"","body":"","note":""}',
     "note には、走り書きから読み取れず補えなかった点があれば一言で書く。無ければ空文字。"
   ].join("\n");
-  const out = await ai(sys, "走り書き:\n" + brief);
+  const out = await ai(sys + styleBlock(await samplesFor("")), "走り書き:\n" + brief);
   return {
     to: out.to || "", cc: out.cc || "", subject: out.subject || "", note: out.note || "",
     body: ensureSig(polish(out.body, out.to || ""))
@@ -1204,6 +1259,7 @@ $("cpSend").onclick = async () => {
   try{
     const r = await api("send", { threadId:composeThread, all:composeAll, to:$("cpTo").value,
       cc:$("cpCc").value, subject:$("cpSubj").value, body:$("cpBody").value, signature:SIGNATURE });
+    rememberEdit($("cpTo").value, lastGenerated, $("cpBody").value);
     closeCompose();
     if(composeThread) dropTodo(composeThread);
     renderFilters();
@@ -1317,6 +1373,12 @@ ${settings.apiKey ? `保存されている値: ${settings.apiKey.length}文字 /
       <div class="d">毎回の生成に足したいこと。例：社名は正式名称で書く／時間は24時間表記</div>
       <textarea class="sh-in" id="inMemo" rows="2" style="margin-top:7px">${esc(settings.memo||"")}</textarea></div></div>
 
+    <div class="sh-sec">書き方の学習</div>
+    <div class="sh-row"><div class="k"><div class="n">手本 ${Object.keys(settings.samples||{}).length}件 ／ 直しの記録 ${(settings.edits||[]).length}件</div>
+      <div class="d">相手ごとに過去の送信メールを手本として覚え、生成に使います。生成案を直して送ると、その差分も覚えます。
+覚え違いが気になるときは消してください。次から取り直します。</div></div>
+      <button class="sh-btn danger" id="btnForget">忘れる</button></div>
+
     <div class="sh-sec">言い換え</div>
     ${(settings.terms||[]).map((t,i) => `
       <div class="sh-row"><div class="k"><div class="n">${esc(t.from)} → ${esc(t.to)}</div></div>
@@ -1343,6 +1405,7 @@ ${settings.apiKey ? `保存されている値: ${settings.apiKey.length}文字 /
   const rerender = () => { flush(); renderSheet(); };
   $("inEp").oninput = e => { settings.endpoint = e.target.value.trim(); save(); };
   $("inTk").oninput = e => { settings.token = e.target.value.trim(); save(); };
+  $("btnForget").onclick = () => { settings.samples = {}; settings.edits = []; flush(); renderSheet(); };
   $("inKey").oninput = e => { settings.apiKey = e.target.value.replace(/\s+/g, ""); save(); };
   $("btnFast").onclick = () => { settings.fast = !settings.fast; flush(); renderSheet(); };
   $("inMemo").oninput = e => { settings.memo = e.target.value; save(); };
