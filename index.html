@@ -432,7 +432,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v14";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v15";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -1082,13 +1082,13 @@ function renderList(){
         : ((currentBox === "TODO" || currentBox === "WAIT") ? `<button class="row-done" data-done="${esc(m.id)}" aria-label="片付ける">
         <svg class="icon" viewBox="0 0 24 24"><path d="m5 12 5 5 9-10"/></svg></button>` : "")}
     </div>`).join("");
-  if(currentBox !== "TODO" && threads.length >= 25){
+  if(currentBox !== "TODO" && threads.length >= 15){
     el.insertAdjacentHTML("beforeend", `<button class="more" id="btnMore">さらに読み込む</button>`);
     $("btnMore").onclick = async () => {
       const b = $("btnMore");
       b.textContent = "読み込み中…"; b.disabled = true;
       try{
-        const r = await api("threads", { box: currentBox, query, limit: 25, start: threads.length });
+        const r = await api("threads", { box: currentBox, query, limit: 15, start: threads.length });
         const add = (r.threads || []).filter(t => !threads.some(x => x.id === t.id));
         threads = threads.concat(add);
         renderList();
@@ -1183,7 +1183,7 @@ async function prefetchTop(list){
   if(prefetching || !connected()) return;
   prefetching = true;
   try{
-    for(const t of (list || []).slice(0, 6)){
+    for(const t of (list || []).slice(0, 4)){
       if(store.get("th." + t.id)) continue;      // すでに持っていれば飛ばす
       try{
         const full = await api("thread", { id: t.id, markRead: false });
@@ -1519,7 +1519,7 @@ async function load(){
     }
     const box = currentBox === "TODO" ? "INBOX" : (currentBox === "WAIT" ? "SENT" : currentBox);
     const r = await api("threads", { box, query, all: !!query,
-      limit: currentBox === "TODO" ? 50 : (currentBox === "WAIT" ? 40 : 25) });
+      limit: currentBox === "TODO" ? 30 : (currentBox === "WAIT" ? 25 : 15) });
     let all = r.threads || [];
     if(currentBox === "WAIT"){
       // 送信済みのうち、最後の1通が自分のもの＝相手からまだ返ってきていない
