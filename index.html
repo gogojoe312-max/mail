@@ -340,6 +340,7 @@ button.rd-meta:hover .rd-to{color:var(--accent)}
     <span class="cp-hint">敬語</span>
     <div class="seg" id="cpSeg" role="group" aria-label="敬語の強さ"></div>
     <button class="chip" id="cpAttach">添付</button>
+    <button class="chip" id="cpLater">時間を指定</button>
     <input type="file" id="cpFileInput" multiple hidden>
     <button class="chip" id="cpRedo">この文体で書き直す</button>
     <span class="cp-hint" id="cpHint"></span>
@@ -386,7 +387,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v10";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v11";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -1753,6 +1754,65 @@ async function redo(){
   }catch(e){ $("cpHint").textContent = e.message; }
 }
 
+// 予約送信。指定した時刻に裏側が送る。
+function nextTime(hhmm, addDays){
+  const [h, mi] = hhmm.split(":").map(Number);
+  const d = new Date();
+  d.setSeconds(0, 0);
+  d.setHours(h, mi);
+  if(addDays) d.setDate(d.getDate() + addDays);
+  else if(d.getTime() <= Date.now()) d.setDate(d.getDate() + 1);
+  return d;
+}
+function fmtWhen(ms){
+  const d = new Date(ms), n = new Date();
+  const same = d.toDateString() === n.toDateString();
+  const t = String(d.getHours()).padStart(2,"0") + ":" + String(d.getMinutes()).padStart(2,"0");
+  return same ? "今日 " + t : (d.getMonth()+1) + "/" + d.getDate() + " " + t;
+}
+$("cpLater").onclick = () => {
+  if(!$("cpTo").value.trim()){ $("cpHint").textContent = "宛先が空です"; return; }
+  const opts = [
+    ["明日の朝 8:00", nextTime("08:00", null)],
+    ["今日の 18:00", nextTime("18:00", null)],
+    ["明日の 10:00", nextTime("10:00", 1)],
+    ["1時間後", new Date(Date.now() + 3600000)]
+  ];
+  const pick = prompt("いつ送りますか。番号か、日時を直接入れてください（例 8/27 09:30）。\n" +
+    opts.map((o,i) => (i+1) + ". " + o[0] + "（" + fmtWhen(o[1].getTime()) + "）").join("\n"));
+  if(!pick) return;
+  let at = null;
+  const n = Number(pick.trim());
+  if(n >= 1 && n <= opts.length) at = opts[n-1][1];
+  else {
+    const m2 = pick.match(/(\d{1,2})\s*[\/月]\s*(\d{1,2})\D+(\d{1,2}):(\d{2})/);
+    if(m2){
+      const d = new Date();
+      d.setMonth(+m2[1]-1, +m2[2]); d.setHours(+m2[3], +m2[4], 0, 0);
+      if(d.getTime() < Date.now()) d.setFullYear(d.getFullYear() + 1);
+      at = d;
+    }
+  }
+  if(!at){ $("cpHint").textContent = "日時を読み取れませんでした"; return; }
+  scheduleSend(at.getTime());
+};
+
+async function scheduleSend(at){
+  $("cpHint").textContent = "予約しています…";
+  try{
+    await api("schedule", {
+      at, threadId: composeThread, all: composeAll, to: $("cpTo").value, cc: $("cpCc").value,
+      subject: $("cpSubj").value, body: $("cpBody").value, signature: SIGNATURE, files: composeFiles
+    });
+    clearTimeout(draftTimer);
+    if(composeDraftId) api("draftDrop", { draftId: composeDraftId }).catch(() => {});
+    settings.draft = null; flush();
+    $("compose").classList.remove("on"); $("scrim").classList.remove("on");
+    banner(fmtWhen(at) + " に送ります。設定から取り消せます。");
+    setTimeout(() => banner(""), 5000);
+  }catch(e){ $("cpHint").textContent = "予約できませんでした。" + e.message; }
+}
+
 // 送る前の点検。答え漏れ・日付の矛盾・添付の言い忘れ・表記ゆれを見る。
 let skipCheckUntil = 0;
 async function preflight(body, to){
@@ -2031,6 +2091,11 @@ ${settings.apiKey ? `保存されている値: ${settings.apiKey.length}文字 /
       <div class="d">毎回の生成に足したいこと。例：社名は正式名称で書く／時間は24時間表記</div>
       <textarea class="sh-in" id="inMemo" rows="2" style="margin-top:7px">${esc(settings.memo||"")}</textarea></div></div>
 
+    <div class="sh-sec">送信の予約</div>
+    <div class="sh-row"><div class="k"><div class="n">予約している送信</div>
+      <div class="d" id="schList">「見る」を押すと表示します。</div></div>
+      <button class="sh-btn" id="btnSch">見る</button></div>
+
     <div class="sh-sec">AI の働き</div>
     <div class="sh-row"><div class="k"><div class="n">${settings.aiTriage ? "要返信をAIが判定" : "要返信を規則で判定"}</div>
       <div class="d">本文を読んで「返事が要るか」を判断します。切ると、宛先と書き出しだけで判定します。</div></div>
@@ -2072,6 +2137,20 @@ ${settings.apiKey ? `保存されている値: ${settings.apiKey.length}文字 /
   const rerender = () => { flush(); renderSheet(); };
   $("inEp").oninput = e => { settings.endpoint = e.target.value.trim(); save(); };
   $("inTk").oninput = e => { settings.token = e.target.value.trim(); save(); };
+  $("btnSch").onclick = async () => {
+    $("schList").textContent = "読み込んでいます…";
+    try{
+      const r = await api("scheduled", {});
+      const list = r.list || [];
+      if(!list.length){ $("schList").textContent = "予約はありません。"; return; }
+      $("schList").innerHTML = list.map(x =>
+        `${esc(fmtWhen(x.at))}　${esc(x.to)}　${esc(x.subject)}　<button class="sh-btn" data-uns="${esc(x.id)}">取り消す</button>`).join("<br>");
+      $("schList").querySelectorAll("[data-uns]").forEach(b => b.onclick = async () => {
+        try{ await api("unschedule", { id: b.dataset.uns }); b.parentElement.querySelector("[data-uns]"); $("btnSch").click(); }
+        catch(e){ $("schList").textContent = "取り消せませんでした。" + e.message; }
+      });
+    }catch(e){ $("schList").textContent = "読み込めませんでした。" + e.message; }
+  };
   $("btnTriage").onclick = () => { settings.aiTriage = !settings.aiTriage; flush(); renderSheet(); };
   $("btnPre").onclick = () => { settings.preflight = !settings.preflight; flush(); renderSheet(); };
   $("btnForget").onclick = () => { settings.samples = {}; settings.edits = []; flush(); renderSheet(); };
