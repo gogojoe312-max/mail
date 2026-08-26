@@ -79,7 +79,13 @@ input,textarea{font-family:inherit;font-size:inherit;color:inherit}
 .search input{flex:1;border:0;background:none;outline:none;font-size:12px;min-width:0}
 .search .icon{width:13px;height:13px}
 .list-scroll{flex:1;min-width:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain}
-.row{display:grid;grid-template-columns:14px minmax(0,1fr);width:100%;max-width:100%;min-height:var(--row-h);
+.filters{flex:0 0 auto;display:flex;gap:7px;padding:8px 12px;border-bottom:1px solid var(--hairline);background:var(--pane-bg)}
+.filters .chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+.row-done{flex:0 0 auto;width:28px;height:28px;border-radius:50%;border:1.5px solid var(--hairline);
+  display:flex;align-items:center;justify-content:center;color:var(--text-3);margin:2px 0 0 6px}
+.row-done:hover{border-color:var(--accent);color:var(--accent)}
+.row-done .icon{width:14px;height:14px}
+.row{display:grid;grid-template-columns:14px minmax(0,1fr) auto;width:100%;max-width:100%;min-height:var(--row-h);
   padding:9px 14px 10px 6px;border-bottom:1px solid var(--hairline-soft);text-align:left;align-items:start;overflow:hidden}
 .row span{min-width:0;max-width:100%}
 .row .dot{width:8px;height:8px;border-radius:50%;background:var(--accent);margin:5px 0 0 3px;visibility:hidden}
@@ -225,6 +231,10 @@ button.rd-meta:hover .rd-to{color:var(--accent)}
         <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1v.2a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-2.8-1.1l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.6 1.6 0 0 0 3.5 15H3.3a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 4.6 8.3l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 2.7-1.1V4.2a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 2.8 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0 1.1 2.7h.2a2 2 0 1 1 0 4h-.2z"/></svg>
       </button>
     </div>
+    <div class="filters">
+      <button class="chip" id="fInbox">受信</button>
+      <button class="chip" id="fTodo">要返信</button>
+    </div>
     <div class="list-scroll" id="listScroll" role="listbox" aria-label="メッセージ一覧"></div>
   </section>
 
@@ -320,7 +330,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "2026-08-26 09:15";   // 設定の一番下に出る。読み込まれているファイルの確認用。
+const BUILD = "2026-08-26 09:35";   // 設定の一番下に出る。読み込まれているファイルの確認用。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -438,7 +448,7 @@ function polish(body, counterpart){
 }
 
 /* ---------- 保存 ---------- */
-const KEY = "mailai.v1", SCHEMA = 6;
+const KEY = "mailai.v1", SCHEMA = 7;
 const store = (() => {
   let ok = false;
   try { localStorage.setItem("_t","1"); localStorage.removeItem("_t"); ok = true; } catch(e){}
@@ -475,6 +485,7 @@ function migrate(raw){
   if(v < 4){ if(!Array.isArray(d.terms)) d.terms = DEFAULT_TERMS.slice(); }
   if(v < 5){ d.fast = !!d.fast; }
   if(v < 6){ d.apiKey = d.apiKey || ""; }
+  if(v < 7){ if(!d.done || typeof d.done !== "object") d.done = {}; }
   d.schema = SCHEMA;
   if(!Array.isArray(d.intents) || !d.intents.length) d.intents = DEFAULT_INTENTS.slice();
   if(!LEVELS[d.level]) d.level = "mid";
@@ -483,7 +494,7 @@ function migrate(raw){
 
 let settings = migrate(store.get(KEY)) || {
   schema: SCHEMA, level:"mid", memo:"", endpoint:"", token:"", fast:false, apiKey:"",
-  terms: DEFAULT_TERMS.slice(), intents: DEFAULT_INTENTS.slice()
+  terms: DEFAULT_TERMS.slice(), intents: DEFAULT_INTENTS.slice(), done: {}
 };
 
 let saveTimer = null;
@@ -635,6 +646,21 @@ let threads = [], currentBox = "INBOX", currentId = null, current = null, query 
 let lastIntent = null, lastGenerated = "";
 let currentDrafts = null, draftsBusy = false, draftsError = "", streamText = "";
 let openMsgs = {};   // メールごとの開閉。既定は最新だけ開く。
+let inboxAll = [];   // 受信箱の生データ。要返信の絞り込みに使う。
+
+// 返信待ちの判定：最後が相手からで、自分が Cc ではなく To に入っていて、まだ片付けていないもの
+function doneKey(t){ return t.id + "|" + (t.msgId || ""); }
+function addressedToMe(t){
+  const to = t.toAll || t.to || "";      // toAll は Apps Script 側の対応後に入る
+  return MINE.test(to);
+}
+function needsReply(t){
+  return !MINE.test(t.addr || "") && addressedToMe(t) && !settings.done[doneKey(t)];
+}
+function pruneDone(){
+  const keys = Object.keys(settings.done || {});
+  if(keys.length > 600) keys.slice(0, keys.length - 400).forEach(k => delete settings.done[k]);
+}
 
 /* ---------- 部品 ---------- */
 const ICONS = {
@@ -669,6 +695,15 @@ function onLevelChanged(){
   if(currentDrafts && lastIntent) generate(lastIntent);
 }
 
+function renderFilters(){
+  const n = (inboxAll || []).filter(needsReply).length;
+  $("fInbox").setAttribute("aria-pressed", currentBox !== "TODO");
+  $("fTodo").setAttribute("aria-pressed", currentBox === "TODO");
+  $("fTodo").textContent = n ? "要返信 " + n : "要返信";
+}
+$("fInbox").onclick = () => { if(currentBox === "INBOX") return; currentBox = "INBOX"; currentId = null; current = null; load(); };
+$("fTodo").onclick  = () => { if(currentBox === "TODO") return; currentBox = "TODO"; currentId = null; current = null; load(); };
+
 function renderSidebar(){
   $("sbScroll").innerHTML = `<div class="sb-head">${esc(ACCOUNT)}</div>` + MAILBOXES.map(b => {
     const n = (b.id === currentBox) ? threads.filter(t => t.unread).length : 0;
@@ -687,18 +722,30 @@ function renderList(){
   if(!threads.length){
     el.innerHTML = `<div class="empty" style="height:100%">
       <svg class="icon" viewBox="0 0 24 24">${ICONS.tray}</svg>
-      <div class="t">${query?"見つかりませんでした":"メッセージはありません"}</div>
-      <div class="s">${query?"別のことばで探すか、検索を消してください。":"新しいメールが届くとここに並びます。"}</div></div>`;
+      <div class="t">${query ? "見つかりませんでした" : (currentBox === "TODO" ? "返信待ちはありません" : "メッセージはありません")}</div>
+      <div class="s">${query ? "別のことばで探すか、検索を消してください。" : (currentBox === "TODO" ? "自分宛てで、まだ返していないメールがここに並びます。" : "新しいメールが届くとここに並びます。")}</div></div>`;
     return;
   }
   el.innerHTML = threads.map(m => `
-    <button class="row ${m.unread?"unread":""}" data-id="${esc(m.id)}" role="option" aria-selected="${m.id===currentId}">
+    <div class="row ${m.unread?"unread":""}" data-id="${esc(m.id)}" role="option" aria-selected="${m.id===currentId}">
       <span class="dot"></span><span>
         <span class="r1"><span class="from">${esc(m.from)}</span><span class="date">${esc(m.date)}</span></span>
         <span class="subj">${esc(m.subject)}</span>
         <span class="prev">${esc(String(m.body||"").replace(/\n+/g," "))}</span>
-      </span></button>`).join("");
+      </span>
+      ${currentBox === "TODO" ? `<button class="row-done" data-done="${esc(m.id)}" aria-label="返信不要にする">
+        <svg class="icon" viewBox="0 0 24 24"><path d="m5 12 5 5 9-10"/></svg></button>` : ""}
+    </div>`).join("");
   el.querySelectorAll("[data-id]").forEach(r => r.onclick = () => open(r.dataset.id));
+  el.querySelectorAll("[data-done]").forEach(b => b.onclick = (e) => {
+    e.stopPropagation();
+    const t = threads.find(x => x.id === b.dataset.done);
+    if(!t) return;
+    settings.done[doneKey(t)] = 1;
+    pruneDone(); flush();
+    threads = threads.filter(x => x.id !== t.id);
+    renderList(); renderFilters();
+  });
 }
 
 async function open(id){
@@ -946,9 +993,13 @@ async function load(){
   loading = !threads.length;
   renderSidebar(); renderList();
   try{
-    const r = await api("threads", { box: currentBox, query, limit: 25 });
-    threads = r.threads || [];
-    if(!query) store.set(key, JSON.stringify(threads));
+    const box = currentBox === "TODO" ? "INBOX" : currentBox;
+    const r = await api("threads", { box, query, limit: currentBox === "TODO" ? 50 : 25 });
+    const all = r.threads || [];
+    if(box === "INBOX") inboxAll = all;
+    threads = currentBox === "TODO" ? all.filter(needsReply) : all;
+    if(!query && currentBox !== "TODO") store.set(key, JSON.stringify(threads));
+    renderFilters();
     banner(connected() ? "" : "ウェブアプリが未接続です。設定からURLと合言葉を入れてください。（いまは見本を表示しています）");
   }catch(e){
     // 失敗を黙って飲み込むと一覧が古いまま凍る。必ず出す。
@@ -1351,6 +1402,7 @@ addEventListener("keydown", e => {
 refreshSegs();
 autogrow();
 updateDock();
+renderFilters();
 renderReader();
 load();
 </script>
