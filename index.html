@@ -478,7 +478,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v42";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v43";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -1672,14 +1672,17 @@ async function load(opts){
     if(stale()) return;
     // 取れたものをそのまま映す。保存の成否に画面を左右させない。
     if(raw.length){
+      // 取れたものは必ず全部出す。保存にあるものは、そこに無いぶんだけ足す。
+      // 件数で比べて片方を捨てると、保存の書き込みが失敗したときに
+      // 取れたばかりの新しい行が消える。
       const fresh = boxView(raw);
       threads = fresh;
       if(!query){
         writeCache(key, raw);
-        // 比べるのは「絞り込んだあとの件数」。生の件数で比べると、
-        // 古い形式の行が多いだけで正しい結果を捨ててしまう。
-        const merged = boxView(readCache(key));
-        if(merged.length >= fresh.length) threads = merged;
+        const stored = boxView(readCache(key));
+        const seen = {};
+        fresh.forEach(t => seen[t.id] = 1);
+        threads = sortByTime(fresh.concat(stored.filter(t => !seen[t.id])));
       }
     } else if(!query){
       threads = boxView(readCache(key));   // 空の取得では手元のものを出す
@@ -1788,7 +1791,7 @@ function slimRow(t){
 
 function saveList(key, list){
   for(let attempt = 0; attempt < 4; attempt++){
-    try{ store.set(key, JSON.stringify(list)); return; }
+    try{ store.set(key, JSON.stringify(list)); return true; }
     catch(e){
       const keys = [];
       for(let i = 0; i < localStorage.length; i++){
@@ -1799,6 +1802,10 @@ function saveList(key, list){
       keys.slice(0, Math.ceil(keys.length / 3)).forEach(k => localStorage.removeItem(k));
     }
   }
+  // 書けなかったときは古い内容を残さない。残すと、次に読んだとき
+  // 「保存の方が新しい」と誤解してしまう。
+  try{ localStorage.removeItem(key); }catch(e){}
+  return false;
 }
 // 保存してあるものから、いまの箱で見せるぶんだけを取り出す
 // 必ず新しい順に並べる。取得の順序に頼らない。
