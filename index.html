@@ -432,7 +432,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v15";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v16";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -1009,11 +1009,19 @@ function renderFilters(){
   $("bulk").hidden = !picking;
   $("bulkN").textContent = sel + "件";
 }
-$("fInbox").onclick = () => { if(currentBox === "INBOX") return; currentBox = "INBOX"; currentId = null; current = null; load(); };
-$("fTodo").onclick  = () => { if(currentBox === "TODO") return; currentBox = "TODO"; currentId = null; current = null; load(); };
-$("fWait").onclick = () => { if(currentBox === "WAIT") return; currentBox = "WAIT"; currentId = null; current = null; load(); };
-$("fSent").onclick = () => { if(currentBox === "SENT") return; currentBox = "SENT"; currentId = null; current = null; load(); };
-$("fDrafts").onclick = () => { if(currentBox === "DRAFTS2") return; currentBox = "DRAFTS2"; currentId = null; current = null; load(); };
+$("fInbox").onclick = () => switchBox("INBOX");
+$("fTodo").onclick  = () => switchBox("TODO");
+$("fWait").onclick = () => switchBox("WAIT");
+$("fSent").onclick = () => switchBox("SENT");
+$("fDrafts").onclick = () => switchBox("DRAFTS2");
+
+// 箱を切り替える。読んでいたメールはそのまま残す。
+function switchBox(box){
+  if(currentBox === box) return;
+  currentBox = box;
+  picking = false; picked = {};
+  load();
+}
 $("fPick").onclick = () => { picking = !picking; picked = {}; renderFilters(); renderList(); };
 
 // まとめて処理する
@@ -1026,6 +1034,7 @@ async function bulk(fn, label){
     try { await fn(id); } catch(e){ ng++; }
   }
   threads = threads.filter(t => !picked[t.id]);
+  ids.forEach(dropFromCaches);
   picked = {}; picking = false;
   renderFilters(); renderList();
   banner(ng ? (label + "できなかったものが" + ng + "件あります。") : (ids.length + "件を" + label + "しました。"));
@@ -1132,6 +1141,7 @@ function renderList(){
     }
     dropTodo(t.id); flush(); pushState();
     threads = threads.filter(x => x.id !== t.id);
+    dropFromCaches(t.id);
     renderList(); renderFilters();
   });
 }
@@ -1492,54 +1502,53 @@ async function generate(intent){
 }
 
 /* ---------- 読み込み ---------- */
-async function load(){
+async function load(opts){
+  const force = !!(opts && opts.force);
   const key = "cache." + currentBox;
-  threads = [];
-  // 前回の一覧をすぐ出して、裏で最新に差し替える。
-  if(currentBox === "TODO"){
-    threads = (settings.todo || []).slice();   // 保存してあるものを即座に出す
-  } else if(currentBox === "DRAFTS2"){
-    threads = [];
-  } else if(!query){
-    const raw = store.get(key);
-    if(raw){ try { threads = JSON.parse(raw) || []; } catch(e){} }
-  }
+
+  // 1. まず手元にあるものを出す。切り替えのたびに空にしない。
+  threads = boxView(readCache(key));
   loading = !threads.length;
+  renderSidebar(); renderList(); renderFilters();
+
+  // 2. 取ったばかりなら取りに行かない。切り替えただけで待たされないようにする。
+  const age = Date.now() - Number(store.get(key + ".at") || 0);
+  if(!force && !query && threads.length && age < 90000){
+    loading = false;
+    renderList();
+    if(currentBox === "INBOX") setTimeout(() => prefetchTop(threads), 400);
+    return;
+  }
+
   $("pullHint").hidden = false; $("pullHint").textContent = "更新中";
-  renderSidebar(); renderList();
   try{
+    let raw;
     if(currentBox === "DRAFTS2"){
       const dr = await api("drafts", {});
-      threads = (dr.drafts || []).map(d => ({
+      raw = (dr.drafts || []).map(d => ({
         id: d.draftId, draftId: d.draftId, from: d.to || "(宛先なし)", addr: d.to || "",
         to: d.to, cc: d.cc, subject: d.subject, date: d.date, body: d.body, unread: false
       }));
-      renderFilters();
-      return;
-    }
-    const box = currentBox === "TODO" ? "INBOX" : (currentBox === "WAIT" ? "SENT" : currentBox);
-    const r = await api("threads", { box, query, all: !!query,
-      limit: currentBox === "TODO" ? 30 : (currentBox === "WAIT" ? 25 : 15) });
-    let all = r.threads || [];
-    if(currentBox === "WAIT"){
-      // 送信済みのうち、最後の1通が自分のもの＝相手からまだ返ってきていない
-      // スレッド単位で覚える。最後のメールのIDで覚えると、取得のたびに食い違って戻ってしまう。
-      all = all.filter(t => !MINE.test(t.toAll || t.to || "") && !(settings.waitDone || {})[t.id]);
-    }
-    if(box === "INBOX"){
-      inboxAll = all;
-      if(!query){
-        mergeTodo(all);
-        aiTriage(all).then(() => { mergeTodo(all); renderFilters();
-          if(currentBox === "TODO"){ threads = (settings.todo||[]).slice(); renderList(); } });
+    } else {
+      const box = currentBox === "TODO" ? "INBOX" : (currentBox === "WAIT" ? "SENT" : currentBox);
+      const r = await api("threads", { box, query, all: !!query,
+        limit: currentBox === "TODO" ? 30 : (currentBox === "WAIT" ? 25 : 15) });
+      raw = r.threads || [];
+      if(box === "INBOX" && !query){
+        inboxAll = raw;
+        mergeTodo(raw);
+        aiTriage(raw).then(() => {
+          mergeTodo(raw); renderFilters();
+          if(currentBox === "TODO"){ threads = boxView([]); renderList(); }
+        });
       }
     }
-    threads = currentBox === "TODO" ? (settings.todo || []).slice() : all;
-    if(!query && currentBox !== "TODO") store.set(key, JSON.stringify(threads));
+    if(!query) writeCache(key, raw);
+    threads = boxView(raw);
     renderFilters();
     banner(connected() ? "" : "ウェブアプリが未接続です。設定からURLと合言葉を入れてください。（いまは見本を表示しています）");
   }catch(e){
-    // 失敗を黙って飲み込むと一覧が古いまま凍る。必ず出す。
+    // 失敗しても手元のものは消さない。理由だけ出す。
     banner("受信できませんでした。" + e.message);
   }finally{
     loading = false;
@@ -1548,6 +1557,45 @@ async function load(){
     if(!currentId) renderReader();
     if(currentBox === "INBOX" && !query) setTimeout(() => prefetchTop(threads), 600);
   }
+}
+
+// 片付けたものは、保存してある一覧からも消す。次に切り替えたとき戻ってこないように。
+function dropFromCaches(id){
+  ["INBOX","SENT","WAIT","DRAFTS2","ARCHIVE","TRASH"].forEach(box => {
+    const k = "cache." + box;
+    const raw = store.get(k);
+    if(!raw) return;
+    try{
+      const list = JSON.parse(raw) || [];
+      const left = list.filter(x => x.id !== id);
+      if(left.length !== list.length) store.set(k, JSON.stringify(left));
+    }catch(e){}
+  });
+}
+
+// 箱ごとの保存。要返信だけは設定側に持っているのでそちらを使う。
+function readCache(key){
+  if(key === "cache.TODO") return (settings.todo || []).slice();
+  if(query) return [];
+  const raw = store.get(key);
+  if(!raw) return [];
+  try { return JSON.parse(raw) || []; } catch(e){ return []; }
+}
+function writeCache(key, list){
+  if(key === "cache.TODO") return;          // 要返信は mergeTodo が持つ
+  try{
+    store.set(key, JSON.stringify(list));
+    store.set(key + ".at", String(Date.now()));
+  }catch(e){}
+}
+// 保存してあるものから、いまの箱で見せるぶんだけを取り出す
+function boxView(list){
+  if(currentBox === "TODO") return (settings.todo || []).slice();
+  if(currentBox === "WAIT"){
+    // 送信済みのうち、最後の1通が自分のもの＝相手からまだ返ってきていない
+    return (list || []).filter(t => !MINE.test(t.toAll || t.to || "") && !(settings.waitDone || {})[t.id]);
+  }
+  return (list || []).slice();
 }
 
 /* ---------- 下の欄 ---------- */
@@ -1802,7 +1850,7 @@ function offerDraft(){
 $("cpClose").onclick = closeCompose;
 $("scrim").onclick = () => { closeCompose(); closeSheet(); closePeople(); closeCal(); };
 $("btnBack").onclick = () => { document.body.classList.remove("reading"); updateDock(); };
-$("btnRefresh").onclick = load;
+$("btnRefresh").onclick = () => load({ force:true });
 function openReply(all){
   const m = replyTarget(); if(!m) return;
   openCompose({
@@ -1843,7 +1891,7 @@ $("btnTrash").onclick = async () => {
   try{
     await api("trash", { id });
     threads = threads.filter(t => t.id !== id);
-    dropTodo(id);
+    dropTodo(id); dropFromCaches(id);
     currentId = null; current = null;
     document.body.classList.remove("reading");
     renderList(); renderReader(); renderFilters(); updateDock();
@@ -1856,7 +1904,7 @@ $("btnArchive").onclick = async () => {
   if(!currentId) return;
   const id = currentId;
   threads = threads.filter(t => t.id !== id);
-  dropTodo(id);
+  dropTodo(id); dropFromCaches(id);
   currentId = null; current = null;
   document.body.classList.remove("reading");
   renderSidebar(); renderList(); renderReader();
@@ -2409,7 +2457,7 @@ autoRefresh();
     sc.style.transition = "transform .18s";
     sc.style.transform = "";
     setTimeout(() => { sc.style.transition = ""; }, 220);
-    if(ready){ ready = false; load(); }
+    if(ready){ ready = false; load({ force:true }); }
   };
   sc.addEventListener("touchend", end, { passive:true });
   sc.addEventListener("touchcancel", end, { passive:true });
