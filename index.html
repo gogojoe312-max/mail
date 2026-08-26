@@ -478,7 +478,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v33";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v34";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -2863,6 +2863,25 @@ addEventListener("keydown", e => {
 
 refreshSegs();
 autogrow();
+// 動作確認用の窓口。中身を書き換える口は持たせない。
+window.__dbg = {
+  get build(){ return BUILD; },
+  get box(){ return currentBox; },
+  get threads(){ return threads.slice(); },
+  get todo(){ return (settings.todo || []).slice(); },
+  get connected(){ return connected(); },
+  setEndpoint(url, token){
+    if(url) settings.endpoint = url;
+    if(token) settings.token = token;
+    flush();
+  },
+  async go(box, force){
+    if(box && box !== currentBox){ currentBox = box; picking = false; picked = {}; }
+    await load(force ? { force:true } : undefined);
+    return threads.length;
+  }
+};
+
 resetCachesIfNeeded();
 if(localStorage.getItem("mail.todover") !== CACHE_VER){
   settings.todo = []; settings.scan = {}; flush();
