@@ -80,26 +80,22 @@ input,textarea{font-family:inherit;font-size:inherit;color:inherit}
 .search input{flex:1;border:0;background:none;outline:none;font-size:12px;min-width:0}
 .search .icon{width:13px;height:13px}
 .list-scroll{flex:1;min-width:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain}
-.filters{flex:0 0 auto;display:flex;gap:7px;padding:8px 12px;border-bottom:1px solid var(--hairline);
-  background:var(--pane-bg);overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;scrollbar-width:none}
-.filters::-webkit-scrollbar{display:none}
-.filters .chip{flex:0 0 auto}
+.filters{flex:0 0 auto;display:flex;flex-wrap:wrap;gap:7px;padding:8px 12px;
+  border-bottom:1px solid var(--hairline);background:var(--pane-bg)}
+.filters .chip{flex:0 0 auto;touch-action:manipulation}
 .filters .chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
 .pull{flex:0 0 auto;display:flex;align-items:center;justify-content:center;height:30px;
   font-size:12px;color:var(--text-3);background:var(--pane-bg)}
 .bulk{flex:0 0 auto;display:flex;align-items:center;gap:7px;padding:8px 12px;border-bottom:1px solid var(--hairline);
   background:var(--fill);font-size:12px;color:var(--text-2)}
 .chip.danger{color:#d70015;border-color:rgba(215,0,21,.35)}
-.pick{flex:0 0 auto;width:22px;height:22px;border-radius:50%;border:1.5px solid var(--hairline);
-  display:flex;align-items:center;justify-content:center;margin:2px 0 0 6px;color:transparent}
-.pick[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
-.pick .icon{width:12px;height:12px}
-.row-done{flex:0 0 auto;width:28px;height:28px;border-radius:50%;border:1.5px solid var(--hairline);
-  display:flex;align-items:center;justify-content:center;color:var(--text-3);margin:2px 0 0 6px}
-.row-done:hover{border-color:var(--accent);color:var(--accent)}
-.row-done .icon{width:14px;height:14px}
+
+.row-done:hover::before{border-color:var(--accent)}
+.row-done:hover{color:var(--accent)}
 .row{display:grid;grid-template-columns:14px minmax(0,1fr) auto;width:100%;max-width:100%;min-height:var(--row-h);
-  padding:9px 14px 10px 6px;border-bottom:1px solid var(--hairline-soft);text-align:left;align-items:start;overflow:hidden}
+  padding:9px 0 10px 6px;border-bottom:1px solid var(--hairline-soft);text-align:left;align-items:start;overflow:hidden}
+.row > span:nth-child(2){padding-right:14px}
+.row .row-done,.row .pick{align-self:stretch}
 .row span{min-width:0;max-width:100%}
 .row .dot{width:8px;height:8px;border-radius:50%;background:var(--accent);margin:5px 0 0 3px;visibility:hidden}
 .row.unread .dot{visibility:visible}
@@ -240,8 +236,18 @@ button.rd-meta:hover .rd-to{color:var(--accent)}
 .draft-act button{height:38px;padding:0 16px;font-size:13.5px}
 .sh-btn{height:36px;padding:0 14px;font-size:13px}
 .row{min-height:76px;padding-top:12px;padding-bottom:13px}
-.row-done,.pick{width:34px;height:34px;margin-left:8px}
-.row-done .icon,.pick .icon{width:17px;height:17px}
+.row:not(:has(.row-done)):not(:has(.pick)) > span:nth-child(2){padding-right:14px}
+.row-done,.pick{position:relative;width:58px;min-height:58px;margin:0;padding:0;
+  align-self:stretch;border:0;border-radius:0;background:none;
+  display:flex;align-items:center;justify-content:center;touch-action:manipulation}
+.row-done::before,.pick::before{content:"";position:absolute;width:30px;height:30px;
+  border-radius:50%;border:1.5px solid var(--hairline)}
+.row-done:active::before,.pick:active::before{background:var(--hairline-soft)}
+.pick[aria-pressed="true"]::before{background:var(--accent);border-color:var(--accent)}
+.row-done .icon,.pick .icon{position:relative;width:16px;height:16px}
+.row-done{color:var(--text-3)}
+.pick{color:transparent}
+.pick[aria-pressed="true"]{color:#fff}
 .more{height:44px;font-size:14px}
 .att button{height:38px;padding:0 14px;font-size:13px}
 .quote-toggle{height:32px;padding:0 14px}
@@ -432,7 +438,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v20";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v21";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
