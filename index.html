@@ -29,7 +29,7 @@ addEventListener("unhandledrejection", function(e){
 </script>
 <title>メール</title>
 <style>
-:root{
+:root{--fs:1;
   --accent:#007aff;--accent-press:#0062cc;--sidebar-bg:#f0eff2;--pane-bg:#ffffff;
   --toolbar-bg:#f6f6f6;--hairline:rgba(0,0,0,.10);--hairline-soft:rgba(0,0,0,.06);
   --fill:rgba(0,0,0,.055);--text:#000;--text-2:rgba(0,0,0,.55);--text-3:rgba(0,0,0,.38);
@@ -277,33 +277,28 @@ button.rd-meta:hover .rd-to{color:var(--accent)}
 .cp-quote .q{max-height:38vh;overflow:auto;padding:0 16px 14px;font-size:12.5px;line-height:1.55;
   white-space:pre-wrap;color:var(--text-2);overflow-wrap:anywhere}
 
-/* ---- 文字の大きさを Gmail 並みに ---- */
-.row .from{font-size:16px;font-weight:600}
-.row .subj{font-size:15px}
-.row .prev{font-size:14px;line-height:1.45}
-.row .date{font-size:13px}
-.rd-subj{font-size:21px;line-height:1.35}
-.rd-name{font-size:16px}
-.rd-to{font-size:13px}
-.rd-date{font-size:13px}
-.rd-body{font-size:16px;line-height:1.75}
-.rd-snippet{font-size:14px}
-.rd-quote{font-size:14px;line-height:1.6}
-.draft-body{font-size:15.5px;line-height:1.7}
-.cp-body{font-size:16.5px;line-height:1.7}
-.cp-field input{font-size:16px}
-.dk-in{font-size:16.5px}
-.chip{font-size:14px}
-.sh-row .n{font-size:15px}
-.sh-row .d{font-size:13px}
-.empty .t{font-size:16px}
-.empty .s{font-size:14px}
+/* ---- 文字の大きさ。設定の「文字の大きさ」で --fs が変わる ---- */
+.row .from{font-size:calc(15px * var(--fs));font-weight:600}
+.row .subj{font-size:calc(14px * var(--fs))}
+.row .prev{font-size:calc(13px * var(--fs));line-height:1.45}
+.row .date{font-size:calc(12.5px * var(--fs))}
+.rd-subj{font-size:calc(19px * var(--fs));line-height:1.35}
+.rd-name{font-size:calc(15px * var(--fs))}
+.rd-to,.rd-date{font-size:calc(12.5px * var(--fs))}
+.rd-body{font-size:calc(15px * var(--fs));line-height:1.7}
+.rd-snippet{font-size:calc(13px * var(--fs))}
+.rd-quote{font-size:calc(13px * var(--fs));line-height:1.6}
+.draft-body{font-size:calc(14.5px * var(--fs));line-height:1.65}
+.cp-body{font-size:calc(15.5px * var(--fs));line-height:1.65}
+.cp-field input{font-size:calc(15.5px * var(--fs))}
+.dk-in{font-size:calc(15.5px * var(--fs))}
+.chip{font-size:calc(13px * var(--fs))}
+.sh-row .n{font-size:calc(14px * var(--fs))}
+.sh-row .d{font-size:calc(12.5px * var(--fs))}
+.empty .t{font-size:calc(15px * var(--fs))}
+.empty .s{font-size:calc(13px * var(--fs))}
 @media (hover:none){
-  .row .from{font-size:17px}
-  .row .subj{font-size:16px}
-  .row .prev{font-size:14.5px}
-  .rd-body{font-size:17px}
-  .cp-body{font-size:17px}
+  .cp-body,.cp-field input,.dk-in{font-size:max(16px, calc(15.5px * var(--fs)))}
 }
 </style>
 </head>
@@ -467,7 +462,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v23";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v24";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -585,7 +580,7 @@ function polish(body, counterpart){
 }
 
 /* ---------- 保存 ---------- */
-const KEY = "mailai.v1", SCHEMA = 14;
+const KEY = "mailai.v1", SCHEMA = 15;
 const store = (() => {
   let ok = false;
   try { localStorage.setItem("_t","1"); localStorage.removeItem("_t"); ok = true; } catch(e){}
@@ -638,6 +633,7 @@ function migrate(raw){
   }
   if(v < 13){ if(!d.waitDone || typeof d.waitDone !== "object") d.waitDone = {}; }
   if(v < 14){ if(!d.scan || typeof d.scan !== "object") d.scan = {}; }
+  if(v < 15){ if(typeof d.fs !== "number") d.fs = 1; }
   d.schema = SCHEMA;
   if(!Array.isArray(d.intents) || !d.intents.length) d.intents = DEFAULT_INTENTS.slice();
   if(!LEVELS[d.level]) d.level = "mid";
@@ -648,11 +644,12 @@ let settings = migrate(store.get(KEY)) || {
   schema: SCHEMA, level:"mid", memo:"", endpoint:"", token:"", fast:false, apiKey:"",
   terms: DEFAULT_TERMS.slice(), intents: DEFAULT_INTENTS.slice(), done: {}, todo: [],
   samples: {}, edits: [], rev: 0, draft: null,
-  tone: {}, triage: {}, aiTriage: false, preflight: true, waitDone: {}, scan: {}
+  tone: {}, triage: {}, aiTriage: false, preflight: true, waitDone: {}, scan: {}, fs: 1
 };
 
 let saveTimer = null;
 const save  = () => { clearTimeout(saveTimer); saveTimer = setTimeout(flush, 400); };
+const applyFs = () => document.documentElement.style.setProperty("--fs", String(settings.fs || 1));
 const flush = () => { clearTimeout(saveTimer); settings.schema = SCHEMA; store.set(KEY, JSON.stringify(settings)); };
 addEventListener("pagehide", flush);
 addEventListener("beforeunload", flush);
@@ -1060,6 +1057,7 @@ $("fPick").onclick = () => { picking = !picking; picked = {}; renderFilters(); r
 async function bulk(fn, label){
   const ids = Object.keys(picked);
   if(!ids.length) return;
+  const rows = threads.filter(t => picked[t.id]);
   banner(label + "しています…");
   let ng = 0;
   for(const id of ids){
@@ -1069,8 +1067,22 @@ async function bulk(fn, label){
   ids.forEach(dropFromCaches);
   picked = {}; picking = false;
   renderFilters(); renderList();
-  banner(ng ? (label + "できなかったものが" + ng + "件あります。") : (ids.length + "件を" + label + "しました。"));
-  setTimeout(() => banner(""), 3500);
+  if(ng){
+    banner(label + "できなかったものが" + ng + "件あります。");
+    setTimeout(() => banner(""), 3500);
+  } else {
+    const box = currentBox;
+    offerUndo(ids.length + "件を" + label + "しました", async () => {
+      for(const t of rows){
+        if(label === "アーカイブ" || label === "削除"){
+          try{ await api("restore", { id: t.id }); }catch(e){}
+        } else if(box === "WAIT") delete (settings.waitDone || {})[t.id];
+        else delete settings.done[doneKey(t)];
+        putBack(t, box === "WAIT" ? "SENT" : "INBOX");
+      }
+      flush(); pushState();
+    });
+  }
 }
 $("bulkArch").onclick  = () => bulk(async id => { await api("archive", { id }); dropTodo(id); }, "アーカイブ");
 $("bulkTrash").onclick = () => bulk(async id => { await api("trash", { id }); dropTodo(id); }, "削除");
@@ -1164,9 +1176,16 @@ function renderList(){
       pruneDone();
     }
     dropTodo(t.id); flush(); pushState();
+    const box = currentBox;
     threads = threads.filter(x => x.id !== t.id);
-    dropFromCaches(t.id);
     renderList(); renderFilters();
+    offerUndo("片付けました", async () => {
+      if(box === "WAIT") delete (settings.waitDone || {})[t.id];
+      else delete settings.done[doneKey(t)];
+      flush(); pushState();
+      if(box === "TODO") mergeTodo([t]);
+      putBack(t, box === "WAIT" ? "SENT" : "INBOX");
+    });
   });
 }
 
@@ -1951,6 +1970,35 @@ function offerDraft(){
     setTimeout(() => banner(""), 2500);
   };
 }
+// 直前の操作を取り消せるようにする
+let lastUndo = null, undoTimer = null;
+function offerUndo(label, undo){
+  clearTimeout(undoTimer);
+  lastUndo = undo;
+  const b = $("banner");
+  b.innerHTML = `${esc(label)} <button class="bn-btn" id="bnUndo">元に戻す</button>`;
+  b.classList.add("on");
+  $("bnUndo").onclick = async () => {
+    const f = lastUndo; lastUndo = null;
+    closeBanner();
+    if(!f) return;
+    banner("戻しています…");
+    try{ await f(); banner("戻しました"); }
+    catch(e){ banner("戻せませんでした。" + e.message); }
+    setTimeout(() => banner(""), 2500);
+  };
+  undoTimer = setTimeout(() => { if(lastUndo === undo){ lastUndo = null; closeBanner(); } }, 15000);
+}
+
+// 一覧から消した行を、元の位置に戻す
+function putBack(t, box){
+  const key = "cache." + (box || currentBox);
+  const list = readCache(key);
+  if(!list.some(x => x.id === t.id)){ list.unshift(t); saveList(key, list.slice(0, 400)); }
+  threads = boxView(readCache("cache." + (currentBox === "WAIT" ? "SENT" : currentBox)));
+  renderList(); renderFilters();
+}
+
 function closeBanner(){
   const b = $("banner");
   b.innerHTML = ""; b.textContent = ""; b.classList.remove("on");
@@ -1999,21 +2047,27 @@ $("btnTrash").onclick = async () => {
   const id = currentId;
   try{
     await api("trash", { id });
+    const row = threads.find(t => t.id === id);
     threads = threads.filter(t => t.id !== id);
     dropTodo(id); dropFromCaches(id);
     currentId = null; current = null;
     document.body.classList.remove("reading");
     renderList(); renderReader(); renderFilters(); updateDock();
-    banner("削除しました");
-    setTimeout(() => banner(""), 2500);
+    if(row) offerUndo("削除しました", async () => {
+      await api("restore", { id }); putBack(row, "INBOX");
+    });
   }catch(e){ banner("削除できませんでした。" + e.message); }
 };
 
 $("btnArchive").onclick = async () => {
   if(!currentId) return;
   const id = currentId;
+  const row = threads.find(t => t.id === id);
   threads = threads.filter(t => t.id !== id);
   dropTodo(id); dropFromCaches(id);
+  if(row) offerUndo("アーカイブしました", async () => {
+    await api("restore", { id }); putBack(row, "INBOX");
+  });
   currentId = null; current = null;
   document.body.classList.remove("reading");
   renderSidebar(); renderList(); renderReader();
@@ -2390,6 +2444,11 @@ ${settings.apiKey ? `保存されている値: ${settings.apiKey.length}文字 /
       <div class="d" id="schList">「見る」を押すと表示します。</div></div>
       <button class="sh-btn" id="btnSch">見る</button></div>
 
+    <div class="sh-sec">見た目</div>
+    <div class="sh-row"><div class="k"><div class="n">文字の大きさ</div>
+      <div class="d">一覧・本文・作成画面のすべてに効きます。</div></div>
+      <div class="seg" id="fsSeg"></div></div>
+
     <div class="sh-sec">仕分けのやり直し</div>
     <div class="sh-row"><div class="k"><div class="n">片付けた記録 ${Object.keys(settings.done||{}).length + Object.keys(settings.waitDone||{}).length}件</div>
       <div class="d">要返信と返事待ちで「片付けた」印を消します。消すと、条件に合うものがもう一度並びます。</div></div>
@@ -2454,6 +2513,12 @@ ${settings.apiKey ? `保存されている値: ${settings.apiKey.length}文字 /
       });
     }catch(e){ $("schList").textContent = "読み込めませんでした。" + e.message; }
   };
+  const FS = [["小",0.9],["中",1],["大",1.12],["特大",1.25]];
+  $("fsSeg").innerHTML = FS.map(([n,v]) =>
+    `<button data-fs="${v}" aria-pressed="${(settings.fs||1)===v}">${n}</button>`).join("");
+  $("fsSeg").querySelectorAll("[data-fs]").forEach(b => b.onclick = () => {
+    settings.fs = Number(b.dataset.fs); flush(); applyFs(); renderSheet();
+  });
   $("btnUndone").onclick = () => {
     settings.done = {}; settings.waitDone = {}; flush(); pushState(); renderSheet();
   };
@@ -2616,6 +2681,7 @@ addEventListener("keydown", e => {
 
 refreshSegs();
 autogrow();
+applyFs();
 updateDock();
 renderFilters();
 renderReader();
