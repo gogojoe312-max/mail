@@ -80,10 +80,10 @@ input,textarea{font-family:inherit;font-size:inherit;color:inherit}
 .search input{flex:1;border:0;background:none;outline:none;font-size:12px;min-width:0}
 .search .icon{width:13px;height:13px}
 .list-scroll{flex:1;min-width:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain}
-.pane-top .chips{flex:1 1 auto;min-width:0;display:flex;gap:7px;overflow-x:auto;overflow-y:hidden;
-  padding:0 2px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
-.pane-top .chips::-webkit-scrollbar{display:none}
-.pane-top .chips .chip{flex:0 0 auto}
+.boxbar{flex:1 1 auto;min-width:0;height:100%;display:flex;flex-wrap:nowrap;align-items:center;gap:7px;
+  overflow-x:auto;overflow-y:hidden;padding:0 4px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.boxbar::-webkit-scrollbar{display:none}
+.boxbar .chip{flex:0 0 auto;white-space:nowrap}
 .chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
 .search-over{position:absolute;left:8px;right:8px;top:50%;transform:translateY(-50%);
   display:flex;align-items:center;gap:8px;height:40px;padding:0 12px;border-radius:20px;
@@ -327,7 +327,7 @@ button.rd-meta:hover .rd-to{color:var(--accent)}
       <button class="tb-btn" id="btnRefresh" title="受信" aria-label="受信">
         <svg class="icon" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 5v6h-6"/></svg>
       </button>
-      <div class="chips" id="filters">
+      <div class="boxbar" id="filters">
         <button class="chip" id="fInbox">受信</button>
         <button class="chip" id="fTodo">要返信</button>
         <button class="chip" id="fWait">返事待ち</button>
@@ -478,7 +478,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v28";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v29";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
