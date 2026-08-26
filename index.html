@@ -82,6 +82,8 @@ input,textarea{font-family:inherit;font-size:inherit;color:inherit}
 .list-scroll{flex:1;min-width:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain}
 .filters{flex:0 0 auto;display:flex;gap:7px;padding:8px 12px;border-bottom:1px solid var(--hairline);background:var(--pane-bg)}
 .filters .chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+.pull{flex:0 0 auto;display:flex;align-items:center;justify-content:center;height:30px;
+  font-size:12px;color:var(--text-3);background:var(--pane-bg)}
 .bulk{flex:0 0 auto;display:flex;align-items:center;gap:7px;padding:8px 12px;border-bottom:1px solid var(--hairline);
   background:var(--fill);font-size:12px;color:var(--text-2)}
 .chip.danger{color:#d70015;border-color:rgba(215,0,21,.35)}
@@ -264,6 +266,7 @@ button.rd-meta:hover .rd-to{color:var(--accent)}
       <button class="chip" id="bulkDone">返信不要</button>
       <button class="chip danger" id="bulkTrash">削除</button>
     </div>
+    <div class="pull" id="pullHint" hidden>引いて更新</div>
     <div class="list-scroll" id="listScroll" role="listbox" aria-label="メッセージ一覧"></div>
   </section>
 
@@ -383,7 +386,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v9";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v10";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -1085,12 +1088,37 @@ async function open(id){
   // 一覧が持っている分でまず表示する。全文は裏で取りに行く。
   current = { id: id, subject: row.subject, messages: [{ id: row.msgId || id, from: row.from,
     addr: row.addr, to: row.to, date: row.date, subject: row.subject, body: row.body || "" }] };
+  markReadLocal(id);
   renderSidebar(); renderList(); renderReader();
   try{
     const full = await api("thread", { id });   // 裏側が Gmail 側も既読にする
     if(currentId === id){ current = full; renderReader(); }
+    markReadLocal(id);
   }catch(e){
+    // 全文が取れなくても既読だけは付けにいく
+    api("read", { id }).catch(() => {});
     if(currentId === id) banner("全文を取得できませんでした。" + e.message);
+  }
+}
+
+// 既読を、画面・保存してある一覧・キャッシュのすべてに反映する。
+// どれかが取り残されると、戻ったときに未読へ巻き戻って見える。
+function markReadLocal(id){
+  const t = threads.find(x => x.id === id);
+  if(t) t.unread = false;
+  const a = (inboxAll || []).find(x => x.id === id);
+  if(a) a.unread = false;
+  const w = (settings.todo || []).find(x => x.id === id);
+  if(w){ w.unread = false; flush(); }
+  for(const box of ["INBOX","SENT","ARCHIVE","TRASH"]){
+    const raw = store.get("cache." + box);
+    if(!raw) continue;
+    try{
+      const list = JSON.parse(raw) || [];
+      let hit = false;
+      list.forEach(x => { if(x.id === id && x.unread){ x.unread = false; hit = true; } });
+      if(hit) store.set("cache." + box, JSON.stringify(list));
+    }catch(e){}
   }
 }
 
@@ -2141,6 +2169,36 @@ function autoRefresh(){
 document.addEventListener("visibilitychange", () => { if(!document.hidden && connected()) load(); });
 addEventListener("pageshow", () => { if(connected()) load(); });
 autoRefresh();
+
+// 一覧を下へ引いて更新する
+;(function(){
+  const sc = $("listScroll"), hint = $("pullHint");
+  let y0 = null, ready = false;
+  sc.addEventListener("touchstart", e => {
+    y0 = (sc.scrollTop <= 0 && e.touches.length === 1) ? e.touches[0].clientY : null;
+    ready = false;
+  }, { passive:true });
+  sc.addEventListener("touchmove", e => {
+    if(y0 === null) return;
+    const dy = e.touches[0].clientY - y0;
+    if(dy <= 0 || sc.scrollTop > 0){ hint.hidden = true; sc.style.transform = ""; return; }
+    ready = dy > 70;
+    hint.hidden = false;
+    hint.textContent = ready ? "離すと更新" : "引いて更新";
+    sc.style.transform = "translateY(" + Math.min(dy * 0.4, 56) + "px)";
+  }, { passive:true });
+  const end = () => {
+    if(y0 === null) return;
+    y0 = null;
+    hint.hidden = true;
+    sc.style.transition = "transform .18s";
+    sc.style.transform = "";
+    setTimeout(() => { sc.style.transition = ""; }, 220);
+    if(ready){ ready = false; load(); }
+  };
+  sc.addEventListener("touchend", end, { passive:true });
+  sc.addEventListener("touchcancel", end, { passive:true });
+})();
 
 // 右へスワイプで一覧に戻る
 ;(function(){
