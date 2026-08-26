@@ -432,7 +432,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v19";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v20";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -550,7 +550,7 @@ function polish(body, counterpart){
 }
 
 /* ---------- 保存 ---------- */
-const KEY = "mailai.v1", SCHEMA = 13;
+const KEY = "mailai.v1", SCHEMA = 14;
 const store = (() => {
   let ok = false;
   try { localStorage.setItem("_t","1"); localStorage.removeItem("_t"); ok = true; } catch(e){}
@@ -602,6 +602,7 @@ function migrate(raw){
     if(typeof d.preflight !== "boolean") d.preflight = true;
   }
   if(v < 13){ if(!d.waitDone || typeof d.waitDone !== "object") d.waitDone = {}; }
+  if(v < 14){ if(!d.scan || typeof d.scan !== "object") d.scan = {}; }
   d.schema = SCHEMA;
   if(!Array.isArray(d.intents) || !d.intents.length) d.intents = DEFAULT_INTENTS.slice();
   if(!LEVELS[d.level]) d.level = "mid";
@@ -612,7 +613,7 @@ let settings = migrate(store.get(KEY)) || {
   schema: SCHEMA, level:"mid", memo:"", endpoint:"", token:"", fast:false, apiKey:"",
   terms: DEFAULT_TERMS.slice(), intents: DEFAULT_INTENTS.slice(), done: {}, todo: [],
   samples: {}, edits: [], rev: 0, draft: null,
-  tone: {}, triage: {}, aiTriage: false, preflight: true, waitDone: {}
+  tone: {}, triage: {}, aiTriage: false, preflight: true, waitDone: {}, scan: {}
 };
 
 let saveTimer = null;
@@ -1087,20 +1088,11 @@ function renderList(){
         : ((currentBox === "TODO" || currentBox === "WAIT") ? `<button class="row-done" data-done="${esc(m.id)}" aria-label="片付ける">
         <svg class="icon" viewBox="0 0 24 24"><path d="m5 12 5 5 9-10"/></svg></button>` : "")}
     </div>`).join("");
-  if(currentBox !== "TODO" && threads.length >= 15){
-    el.insertAdjacentHTML("beforeend", `<button class="more" id="btnMore">さらに読み込む</button>`);
-    $("btnMore").onclick = async () => {
-      const b = $("btnMore");
-      b.textContent = "読み込み中…"; b.disabled = true;
-      try{
-        const r = await api("threads", { box: currentBox, query, limit: 15, start: threads.length });
-        const add = (r.threads || []).filter(t => !threads.some(x => x.id === t.id));
-        threads = threads.concat(add);
-        if(!query) writeCache("cache." + currentBox, threads);   // 読み込んだぶんも残す
-        renderList();
-        if(!add.length) banner("これ以上ありません。");
-      }catch(e){ banner("読み込めませんでした。" + e.message); b.textContent = "さらに読み込む"; b.disabled = false; }
-    };
+  if(threads.length || currentBox === "TODO" || currentBox === "WAIT"){
+    const scanning = (currentBox === "TODO" || currentBox === "WAIT");
+    el.insertAdjacentHTML("beforeend",
+      `<button class="more" id="btnMore">${scanning ? "過去をさかのぼって調べる" : "さらに読み込む"}</button>`);
+    $("btnMore").onclick = () => loadMore();
   }
   el.querySelectorAll("[data-pick]").forEach(b => b.onclick = (e) => {
     e.stopPropagation();
@@ -1501,7 +1493,7 @@ async function generate(intent){
 /* ---------- 読み込み ---------- */
 async function load(opts){
   const force = !!(opts && opts.force);
-  const key = "cache." + currentBox;
+  const key = "cache." + (currentBox === "WAIT" ? "SENT" : currentBox);
 
   // 1. まず手元にあるものを出す。切り替えのたびに空にしない。
   threads = boxView(readCache(key));
@@ -1573,6 +1565,43 @@ function dropFromCaches(id){
   });
 }
 
+// 過去へさかのぼる。要返信と返事待ちは、判定し直したぶんだけ増える。
+async function loadMore(){
+  const b = $("btnMore");
+  const scanning = (currentBox === "TODO" || currentBox === "WAIT");
+  const box = currentBox === "TODO" ? "INBOX" : (currentBox === "WAIT" ? "SENT" : currentBox);
+  const before = threads.length;
+  if(b){ b.textContent = "調べています…"; b.disabled = true; }
+  try{
+    settings.scan = settings.scan || {};
+    const start = scanning ? (settings.scan[box] || 15) : threads.length;
+    const r = await api("threads", { box, query, all: !!query,
+      full: currentBox === "WAIT", limit: 25, start });
+    const raw = r.threads || [];
+    if(!raw.length){
+      banner("これ以上ありません。");
+      if(b){ b.textContent = scanning ? "過去をさかのぼって調べる" : "さらに読み込む"; b.disabled = false; }
+      return;
+    }
+    if(scanning){
+      settings.scan[box] = start + raw.length;
+      flush();
+    }
+    if(!query) writeCache("cache." + box, readCache("cache." + box).concat(raw));
+    if(box === "INBOX" && !query) mergeTodo(raw);
+    threads = boxView(readCache("cache." + currentBox));
+    renderList(); renderFilters();
+    const got = threads.length - before;
+    banner(scanning
+      ? (start + "件目から" + raw.length + "件を調べ、" + (got > 0 ? got + "件が該当しました。" : "該当はありませんでした。"))
+      : "");
+    setTimeout(() => banner(""), 4000);
+  }catch(e){
+    banner("読み込めませんでした。" + e.message);
+    if(b){ b.textContent = scanning ? "過去をさかのぼって調べる" : "さらに読み込む"; b.disabled = false; }
+  }
+}
+
 // 箱ごとの保存。要返信だけは設定側に持っているのでそちらを使う。
 function readCache(key){
   if(key === "cache.TODO") return (settings.todo || []).slice();
@@ -1612,6 +1641,7 @@ function saveList(key, list){
 // 保存してあるものから、いまの箱で見せるぶんだけを取り出す
 function boxView(list){
   if(currentBox === "TODO") return (settings.todo || []).slice();
+  if(currentBox === "WAIT" && !list.length) list = readCache("cache.SENT");
   if(currentBox === "WAIT"){
     // 送信済みのうち、最後の1通が自分のもの＝相手からまだ返ってきていない
     return (list || []).filter(t => !MINE.test(t.toAll || t.to || "") && !(settings.waitDone || {})[t.id]);
@@ -2301,6 +2331,15 @@ ${settings.apiKey ? `保存されている値: ${settings.apiKey.length}文字 /
       <div class="d" id="schList">「見る」を押すと表示します。</div></div>
       <button class="sh-btn" id="btnSch">見る</button></div>
 
+    <div class="sh-sec">仕分けのやり直し</div>
+    <div class="sh-row"><div class="k"><div class="n">片付けた記録 ${Object.keys(settings.done||{}).length + Object.keys(settings.waitDone||{}).length}件</div>
+      <div class="d">要返信と返事待ちで「片付けた」印を消します。消すと、条件に合うものがもう一度並びます。</div></div>
+      <button class="sh-btn danger" id="btnUndone">消す</button></div>
+    <div class="sh-row"><div class="k"><div class="n">さかのぼった位置</div>
+      <div class="d">受信 ${(settings.scan||{}).INBOX || 15}件目まで ／ 送信済み ${(settings.scan||{}).SENT || 15}件目まで調べました。
+先頭に戻すと、次の「さかのぼって調べる」で最初から調べ直します。</div></div>
+      <button class="sh-btn" id="btnRescan">先頭に戻す</button></div>
+
     <div class="sh-sec">AI の働き</div>
     <div class="sh-row"><div class="k"><div class="n">${settings.aiTriage ? "要返信をAIが判定" : "要返信を規則で判定"}</div>
       <div class="d">本文を読んで「返事が要るか」を判断します。切ると、宛先と書き出しだけで判定します。</div></div>
@@ -2356,6 +2395,10 @@ ${settings.apiKey ? `保存されている値: ${settings.apiKey.length}文字 /
       });
     }catch(e){ $("schList").textContent = "読み込めませんでした。" + e.message; }
   };
+  $("btnUndone").onclick = () => {
+    settings.done = {}; settings.waitDone = {}; flush(); pushState(); renderSheet();
+  };
+  $("btnRescan").onclick = () => { settings.scan = {}; flush(); renderSheet(); };
   $("btnTriage").onclick = () => { settings.aiTriage = !settings.aiTriage; flush(); renderSheet(); };
   $("btnPre").onclick = () => { settings.preflight = !settings.preflight; flush(); renderSheet(); };
   $("btnForget").onclick = () => { settings.samples = {}; settings.edits = []; flush(); renderSheet(); };
