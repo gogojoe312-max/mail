@@ -478,7 +478,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v34";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v35";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -894,8 +894,11 @@ function doneKey(t){ return t.id + "|" + (t.msgId || ""); }
 function addressedToMe(t){
   const to = addrList(t.toAll || t.to || "");
   const cc = addrList(t.ccAll || "");
-  if(!to.some(p => MINE.test(p.addr || ""))) return false;   // To に自分がいない
-  return (to.length + cc.length) <= 8;     // 宛先が少人数なら個別のやり取りとみなす
+  if(!to.some(p => MINE.test(p.addr || ""))) return false;      // To に自分がいない
+  if(to.length === 1 && cc.length === 0) return true;           // 自分だけに届いた
+  const head = String(t.body || "").slice(0, 40);               // 書き出しの宛名を見る
+  if(/各位|皆様|皆さま|みなさま|関係者/.test(head)) return false;  // 一斉の呼びかけ
+  return /高崎|takasaki/i.test(head);                            // 名指しされている
 }
 function needsReply(t){
   if(t.replied) return false;              // 自分が返したものは出さない
@@ -1082,6 +1085,13 @@ function tapOnly(el, fn){
   el.addEventListener("click", e => e.preventDefault());
 }
 
+// 片付けて隠しているものがあることを、必ず画面に出す
+function doneNote(){
+  const n = currentBox === "WAIT" ? Object.keys(settings.waitDone || {}).length
+          : Object.keys(settings.done || {}).length;
+  return n ? "（片付けたものが" + n + "件あります。設定の「仕分けのやり直し」で戻せます）" : "";
+}
+
 function renderFilters(){
   const n = (settings.todo || []).length;
   $("fInbox").setAttribute("aria-pressed", currentBox === "INBOX");
@@ -1174,8 +1184,8 @@ function renderList(){
         : currentBox === "WAIT" ? "返事待ちはありません"
         : currentBox === "DRAFTS2" ? "下書きはありません" : "メッセージはありません"}</div>
       <div class="s">${query ? "別のことばで探すか、検索を消してください。"
-        : currentBox === "TODO" ? "自分宛てで、まだ返していないメールがここに並びます。"
-        : currentBox === "WAIT" ? "自分が送ったまま、相手から返ってきていないものが並びます。"
+        : currentBox === "TODO" ? ("自分宛てで、まだ返していないメールがここに並びます。" + doneNote())
+        : currentBox === "WAIT" ? ("自分が送ったまま、相手から返ってきていないものが並びます。" + doneNote())
         : currentBox === "DRAFTS2" ? "書きかけのメールがここに並びます。"
         : "新しいメールが届くとここに並びます。"}</div></div>`;
     return;
@@ -1195,7 +1205,8 @@ function renderList(){
   if(threads.length || currentBox === "TODO" || currentBox === "WAIT"){
     const scanning = (currentBox === "TODO" || currentBox === "WAIT");
     el.insertAdjacentHTML("beforeend",
-      `<button class="more" id="btnMore">${scanning ? "過去をさかのぼって調べる" : "さらに読み込む"}</button>`);
+      `<button class="more" id="btnMore">${scanning ? "過去をさかのぼって調べる" : "さらに読み込む"}</button>` +
+      (scanning && doneNote() ? `<div class="status">${esc(doneNote())}</div>` : ""));
     $("btnMore").onclick = () => loadMore();
   }
   el.querySelectorAll("[data-pick]").forEach(b => b.onclick = (e) => {
