@@ -330,7 +330,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "2026-08-26 09:55";   // 設定の一番下に出る。読み込まれているファイルの確認用。
+const BUILD = "v1";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -1372,6 +1372,25 @@ ${settings.apiKey ? `保存されている値: ${settings.apiKey.length}文字 /
     f.click();
   };
 }
+
+// 新しい版が出ていたら自分で入れ替わる。手で開き直さなくてよくする。
+async function checkUpdate(){
+  try{
+    const r = await fetch("version.json?nc=" + Date.now(), { cache: "no-store" });
+    const v = (await r.json()).build;
+    if(!v || v === BUILD) return;
+    let tried = null;
+    try { tried = sessionStorage.getItem("upd"); } catch(e){}
+    if(tried === v){
+      banner("新しい版 " + v + " が出ています。反映されないときはタブを閉じて開き直してください。");
+      return;
+    }
+    try { sessionStorage.setItem("upd", v); } catch(e){}
+    location.replace(location.pathname + "?b=" + encodeURIComponent(v));
+  }catch(e){}
+}
+checkUpdate();
+document.addEventListener("visibilitychange", () => { if(!document.hidden) checkUpdate(); });
 
 // 画面に戻ったときと、開いている間は1分ごとに受信箱を取り直す
 let refreshTimer = null;
