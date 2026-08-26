@@ -80,7 +80,10 @@ input,textarea{font-family:inherit;font-size:inherit;color:inherit}
 .search input{flex:1;border:0;background:none;outline:none;font-size:12px;min-width:0}
 .search .icon{width:13px;height:13px}
 .list-scroll{flex:1;min-width:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain}
-.filters{flex:0 0 auto;display:flex;gap:7px;padding:8px 12px;border-bottom:1px solid var(--hairline);background:var(--pane-bg)}
+.filters{flex:0 0 auto;display:flex;gap:7px;padding:8px 12px;border-bottom:1px solid var(--hairline);
+  background:var(--pane-bg);overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.filters::-webkit-scrollbar{display:none}
+.filters .chip{flex:0 0 auto}
 .filters .chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
 .pull{flex:0 0 auto;display:flex;align-items:center;justify-content:center;height:30px;
   font-size:12px;color:var(--text-3);background:var(--pane-bg)}
@@ -291,9 +294,9 @@ button.rd-meta:hover .rd-to{color:var(--accent)}
       <button class="chip" id="fInbox">受信</button>
       <button class="chip" id="fTodo">要返信</button>
       <button class="chip" id="fWait">返事待ち</button>
+      <button class="chip" id="fSent">送信済み</button>
       <button class="chip" id="fDrafts">下書き</button>
-      <button class="chip" id="fPick" style="margin-left:auto">選択</button>
-      <span class="busy" id="busy" hidden><span class="spin"></span>更新中</span>
+      <button class="chip" id="fPick">選択</button>
     </div>
     <div class="bulk" id="bulk" hidden>
       <span id="bulkN">0件</span>
@@ -426,7 +429,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v12";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v13";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -544,7 +547,7 @@ function polish(body, counterpart){
 }
 
 /* ---------- 保存 ---------- */
-const KEY = "mailai.v1", SCHEMA = 12;
+const KEY = "mailai.v1", SCHEMA = 13;
 const store = (() => {
   let ok = false;
   try { localStorage.setItem("_t","1"); localStorage.removeItem("_t"); ok = true; } catch(e){}
@@ -595,6 +598,7 @@ function migrate(raw){
     if(typeof d.aiTriage !== "boolean") d.aiTriage = true;
     if(typeof d.preflight !== "boolean") d.preflight = true;
   }
+  if(v < 13){ if(!d.waitDone || typeof d.waitDone !== "object") d.waitDone = {}; }
   d.schema = SCHEMA;
   if(!Array.isArray(d.intents) || !d.intents.length) d.intents = DEFAULT_INTENTS.slice();
   if(!LEVELS[d.level]) d.level = "mid";
@@ -605,7 +609,7 @@ let settings = migrate(store.get(KEY)) || {
   schema: SCHEMA, level:"mid", memo:"", endpoint:"", token:"", fast:false, apiKey:"",
   terms: DEFAULT_TERMS.slice(), intents: DEFAULT_INTENTS.slice(), done: {}, todo: [],
   samples: {}, edits: [], rev: 0, draft: null,
-  tone: {}, triage: {}, aiTriage: true, preflight: true
+  tone: {}, triage: {}, aiTriage: true, preflight: true, waitDone: {}
 };
 
 let saveTimer = null;
@@ -918,6 +922,7 @@ function pushState(){
         rev: settings.rev,
         todo: (settings.todo || []).slice(0, 80).map(slimForSync),
         done: settings.done || {},
+        waitDone: settings.waitDone || {},
         edits: (settings.edits || []).slice(-20)
       })});
     }catch(e){}
@@ -932,6 +937,7 @@ async function pullState(){
     if(!rs || typeof rs !== "object") return;
     if((rs.rev || 0) <= (settings.rev || 0)) return;   // こちらの方が新しければ触らない
     settings.done = Object.assign({}, rs.done || {}, settings.done || {});
+    settings.waitDone = Object.assign({}, rs.waitDone || {}, settings.waitDone || {});
     settings.todo = (rs.todo || []).filter(t => !settings.done[doneKey(t)]);
     if(Array.isArray(rs.edits) && rs.edits.length) settings.edits = rs.edits;
     settings.rev = rs.rev || 0;
@@ -992,6 +998,7 @@ function renderFilters(){
   $("fInbox").setAttribute("aria-pressed", currentBox === "INBOX");
   $("fTodo").setAttribute("aria-pressed", currentBox === "TODO");
   $("fWait").setAttribute("aria-pressed", currentBox === "WAIT");
+  $("fSent").setAttribute("aria-pressed", currentBox === "SENT");
   $("fDrafts").setAttribute("aria-pressed", currentBox === "DRAFTS2");
   $("fPick").setAttribute("aria-pressed", picking);
   $("fTodo").textContent = n ? "要返信 " + n : "要返信";
@@ -1002,6 +1009,7 @@ function renderFilters(){
 $("fInbox").onclick = () => { if(currentBox === "INBOX") return; currentBox = "INBOX"; currentId = null; current = null; load(); };
 $("fTodo").onclick  = () => { if(currentBox === "TODO") return; currentBox = "TODO"; currentId = null; current = null; load(); };
 $("fWait").onclick = () => { if(currentBox === "WAIT") return; currentBox = "WAIT"; currentId = null; current = null; load(); };
+$("fSent").onclick = () => { if(currentBox === "SENT") return; currentBox = "SENT"; currentId = null; current = null; load(); };
 $("fDrafts").onclick = () => { if(currentBox === "DRAFTS2") return; currentBox = "DRAFTS2"; currentId = null; current = null; load(); };
 $("fPick").onclick = () => { picking = !picking; picked = {}; renderFilters(); renderList(); };
 
@@ -1024,8 +1032,11 @@ $("bulkArch").onclick  = () => bulk(async id => { await api("archive", { id }); 
 $("bulkTrash").onclick = () => bulk(async id => { await api("trash", { id }); dropTodo(id); }, "削除");
 $("bulkDone").onclick  = () => bulk(async id => {
   const t = threads.find(x => x.id === id);
-  if(t){ settings.done[doneKey(t)] = 1; dropTodo(id); }
-}, "返信不要に");
+  if(!t) return;
+  if(currentBox === "WAIT"){ settings.waitDone = settings.waitDone || {}; settings.waitDone[id] = 1; }
+  else settings.done[doneKey(t)] = 1;
+  dropTodo(id);
+}, "片付け");
 
 function renderSidebar(){
   $("sbScroll").innerHTML = `<div class="sb-head">${esc(ACCOUNT)}</div>` + MAILBOXES.map(b => {
@@ -1107,8 +1118,16 @@ function renderList(){
     e.stopPropagation();
     const t = threads.find(x => x.id === b.dataset.done);
     if(!t) return;
-    settings.done[doneKey(t)] = 1;
-    pruneDone(); dropTodo(t.id); flush(); pushState();
+    if(currentBox === "WAIT"){
+      settings.waitDone = settings.waitDone || {};
+      settings.waitDone[t.id] = 1;
+      const wk = Object.keys(settings.waitDone);
+      if(wk.length > 300) wk.slice(0, wk.length - 300).forEach(k => delete settings.waitDone[k]);
+    } else {
+      settings.done[doneKey(t)] = 1;
+      pruneDone();
+    }
+    dropTodo(t.id); flush(); pushState();
     threads = threads.filter(x => x.id !== t.id);
     renderList(); renderFilters();
   });
@@ -1456,7 +1475,7 @@ async function load(){
     if(raw){ try { threads = JSON.parse(raw) || []; } catch(e){} }
   }
   loading = !threads.length;
-  $("busy").hidden = false;
+  $("pullHint").hidden = false; $("pullHint").textContent = "更新中";
   renderSidebar(); renderList();
   try{
     if(currentBox === "DRAFTS2"){
@@ -1474,7 +1493,8 @@ async function load(){
     let all = r.threads || [];
     if(currentBox === "WAIT"){
       // 送信済みのうち、最後の1通が自分のもの＝相手からまだ返ってきていない
-      all = all.filter(t => !MINE.test(t.toAll || t.to || "") && !settings.done[doneKey(t)]);
+      // スレッド単位で覚える。最後のメールのIDで覚えると、取得のたびに食い違って戻ってしまう。
+      all = all.filter(t => !MINE.test(t.toAll || t.to || "") && !(settings.waitDone || {})[t.id]);
     }
     if(box === "INBOX"){
       inboxAll = all;
@@ -1492,7 +1512,8 @@ async function load(){
     // 失敗を黙って飲み込むと一覧が古いまま凍る。必ず出す。
     banner("受信できませんでした。" + e.message);
   }finally{
-    loading = false; $("busy").hidden = true;
+    loading = false;
+    $("pullHint").hidden = true; $("pullHint").textContent = "引いて更新";
     renderSidebar(); renderList();
     if(!currentId) renderReader();
   }
