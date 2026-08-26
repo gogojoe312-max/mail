@@ -478,7 +478,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v41";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v42";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -669,6 +669,7 @@ const save  = () => { clearTimeout(saveTimer); saveTimer = setTimeout(flush, 400
 // 保存の形を変えたときは、古い保存を捨ててやり直す。
 // 混ざったまま使うと、表示が欠けたり順序が壊れたりする。
 const CACHE_VER = "5";
+const RULE_VER = "2";   // 要返信の判定を変えたら上げる
 function resetCachesIfNeeded(){
   let cur = null;
   try { cur = localStorage.getItem("mail.cachever"); } catch(e){ return; }
@@ -964,10 +965,11 @@ function mergeTodo(fetched){
   const keep = {};
   (settings.todo || []).forEach(t => keep[t.id] = t);
   // 今回取得できたものは状態が確定する。返信済み・対象外になったものは落とす。
+  // 取得できた範囲は毎回判定し直す。基準を変えたときに古い行が残らないようにする。
+  // 取得の枠から外れたものは、判定できないので手元に残す。
   fetched.forEach(t => {
-    if(needsReply(t)){ keep[t.id] = slimThread(t); return; }
-    // 消すのは「自分が返した」「片付けた」ときだけ。判定が揺れても消さない。
-    if(t.replied || MINE.test(t.addr || "") || settings.done[doneKey(t)]) delete keep[t.id];
+    if(needsReply(t)) keep[t.id] = slimThread(t);
+    else delete keep[t.id];
   });
   const seen = {}, out = [];
   fetched.forEach(t => { if(keep[t.id] && !seen[t.id]){ out.push(keep[t.id]); seen[t.id] = 1; } });
@@ -2929,9 +2931,9 @@ window.__dbg = {
 };
 
 resetCachesIfNeeded();
-if(localStorage.getItem("mail.todover") !== CACHE_VER){
+if(localStorage.getItem("mail.todover") !== CACHE_VER + "." + RULE_VER){
   settings.todo = []; settings.scan = {}; flush();
-  try { localStorage.setItem("mail.todover", CACHE_VER); } catch(e){}
+  try { localStorage.setItem("mail.todover", CACHE_VER + "." + RULE_VER); } catch(e){}
 }
 applyFs();
 updateDock();
