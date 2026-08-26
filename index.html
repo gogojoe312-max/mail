@@ -432,7 +432,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v18";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v19";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -1096,6 +1096,7 @@ function renderList(){
         const r = await api("threads", { box: currentBox, query, limit: 15, start: threads.length });
         const add = (r.threads || []).filter(t => !threads.some(x => x.id === t.id));
         threads = threads.concat(add);
+        if(!query) writeCache("cache." + currentBox, threads);   // 読み込んだぶんも残す
         renderList();
         if(!add.length) banner("これ以上ありません。");
       }catch(e){ banner("読み込めませんでした。" + e.message); b.textContent = "さらに読み込む"; b.disabled = false; }
@@ -1210,14 +1211,14 @@ function cacheThread(full){
         subject:m.subject, body:String(m.body||"").slice(0,4000), files:m.files || []
       }))
     };
-    store.set("th." + full.id, JSON.stringify(slim));
+    saveList("th." + full.id, slim);
     // 増えすぎないよう、覚えるスレッドは30件まで
     const keys = [];
     for(let i = 0; i < localStorage.length; i++){
       const k = localStorage.key(i);
       if(k && k.indexOf("th.") === 0) keys.push(k);
     }
-    if(keys.length > 30) keys.slice(0, keys.length - 30).forEach(k => localStorage.removeItem(k));
+    if(keys.length > 150) keys.slice(0, keys.length - 150).forEach(k => localStorage.removeItem(k));
   }catch(e){}
 }
 
@@ -1580,12 +1581,33 @@ function readCache(key){
   if(!raw) return [];
   try { return JSON.parse(raw) || []; } catch(e){ return []; }
 }
-function writeCache(key, list){
+// 取ったものを積み上げる。普通のメーラーと同じで、一度見たものは消えない。
+function writeCache(key, fresh){
   if(key === "cache.TODO") return;          // 要返信は mergeTodo が持つ
   try{
-    store.set(key, JSON.stringify(list));
+    const old = readCache(key);
+    const seen = {}, out = [];
+    (fresh || []).forEach(t => { if(!seen[t.id]){ seen[t.id] = 1; out.push(t); } });
+    old.forEach(t => { if(!seen[t.id]){ seen[t.id] = 1; out.push(t); } });
+    saveList(key, out.slice(0, 400));
     store.set(key + ".at", String(Date.now()));
   }catch(e){}
+}
+
+// 保存しきれないときは、古いスレッドの本文から順に捨てて場所を空ける
+function saveList(key, list){
+  for(let attempt = 0; attempt < 4; attempt++){
+    try{ store.set(key, JSON.stringify(list)); return; }
+    catch(e){
+      const keys = [];
+      for(let i = 0; i < localStorage.length; i++){
+        const k = localStorage.key(i);
+        if(k && k.indexOf("th.") === 0) keys.push(k);
+      }
+      if(!keys.length){ list = list.slice(0, Math.max(30, Math.floor(list.length / 2))); continue; }
+      keys.slice(0, Math.ceil(keys.length / 3)).forEach(k => localStorage.removeItem(k));
+    }
+  }
 }
 // 保存してあるものから、いまの箱で見せるぶんだけを取り出す
 function boxView(list){
