@@ -478,7 +478,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v30";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v31";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -596,7 +596,7 @@ function polish(body, counterpart){
 }
 
 /* ---------- 保存 ---------- */
-const KEY = "mailai.v1", SCHEMA = 15;
+const KEY = "mailai.v1", SCHEMA = 16;
 const store = (() => {
   let ok = false;
   try { localStorage.setItem("_t","1"); localStorage.removeItem("_t"); ok = true; } catch(e){}
@@ -650,6 +650,7 @@ function migrate(raw){
   if(v < 13){ if(!d.waitDone || typeof d.waitDone !== "object") d.waitDone = {}; }
   if(v < 14){ if(!d.scan || typeof d.scan !== "object") d.scan = {}; }
   if(v < 15){ if(typeof d.fs !== "number") d.fs = 1; }
+  if(v < 16){ if(!d.names || typeof d.names !== "object") d.names = {}; }
   d.schema = SCHEMA;
   if(!Array.isArray(d.intents) || !d.intents.length) d.intents = DEFAULT_INTENTS.slice();
   if(!LEVELS[d.level]) d.level = "mid";
@@ -660,7 +661,7 @@ let settings = migrate(store.get(KEY)) || {
   schema: SCHEMA, level:"mid", memo:"", endpoint:"", token:"", fast:false, apiKey:"",
   terms: DEFAULT_TERMS.slice(), intents: DEFAULT_INTENTS.slice(), done: {}, todo: [],
   samples: {}, edits: [], rev: 0, draft: null,
-  tone: {}, triage: {}, aiTriage: false, preflight: true, waitDone: {}, scan: {}, fs: 1
+  tone: {}, triage: {}, aiTriage: false, preflight: true, waitDone: {}, scan: {}, fs: 1, names: {}
 };
 
 let saveTimer = null;
@@ -1235,6 +1236,7 @@ async function open(id){
   currentDrafts = null; draftsBusy = false; draftsError = "";
   openMsgs = {};
   dockForceNew = false;
+  learnName(row.addr).then(() => {});       // 宛名を先に用意しておく
   const tone = toneFor(row.addr);           // その相手に前回使った文体へ
   if(tone && tone !== settings.level){ settings.level = tone; flush(); refreshSegs(); }
   document.body.classList.add("reading");
@@ -2088,8 +2090,42 @@ $("cpClose").onclick = closeCompose;
 $("scrim").onclick = () => { closeCompose(); closeSheet(); closePeople(); closeCal(); };
 $("btnBack").onclick = () => { document.body.classList.remove("reading"); updateDock(); };
 $("btnRefresh").onclick = () => load({ force:true });
-// 相手の呼び名。会社名や括弧書きを外し、名字だけにする。
+// 過去に自分が書いた宛名から、その相手の呼び名を覚える
+function pickSalutation(text){
+  const first = String(text || "").replace(/\r/g, "").split("\n").map(x => x.trim()).find(Boolean);
+  if(!first) return "";
+  const m = first.match(/^(.{1,10}?)\s*(?:さま|様|さん)$/);
+  if(!m) return "";
+  const n = m[1].trim();
+  if(!n || /各位|皆|ご担当|担当者/.test(n)) return "";
+  return n;
+}
+function rememberName(addr, text){
+  const k = String(addr || "").toLowerCase();
+  const n = pickSalutation(text);
+  if(!k || !n) return;
+  settings.names = settings.names || {};
+  if(settings.names[k] === n) return;
+  settings.names[k] = n;
+  const keys = Object.keys(settings.names);
+  if(keys.length > 300) keys.slice(0, keys.length - 300).forEach(x => delete settings.names[x]);
+  flush();
+}
+// 過去の送信メールから宛名を拾って覚える。取りに行くのは相手ごとに一度だけ。
+async function learnName(addr){
+  const k = String(addr || "").toLowerCase();
+  if(!k || (settings.names || {})[k]) return;
+  const list = await samplesFor(addr);
+  for(const x of (list || [])){
+    const n = pickSalutation(x.body);
+    if(n){ rememberName(addr, x.body); break; }
+  }
+}
+
+// 相手の呼び名。覚えていればそれを使い、無ければ差出人名から推測する。
 function callName(m){
+  const known = (settings.names || {})[String(m.addr || "").toLowerCase()];
+  if(known) return known;
   let n = String(m.from || "").replace(/\([^)]*\)/g, "").replace(/【[^】]*】/g, "").trim();
   if(!n || n.indexOf("@") !== -1) return "";
   const parts = n.split(/[\s　]+/).filter(Boolean);
@@ -2118,6 +2154,7 @@ function replySkeleton(m){
 
 function openReply(all){
   const m = replyTarget(); if(!m) return;
+  learnName(m.addr).then(() => {});   // 次に開くときのために裏で覚える
   const sk = replySkeleton(m);
   openCompose({
     quote: m, to:m.addr, cc: all ? replyAllCc(m) : "",
@@ -2369,6 +2406,7 @@ $("cpSend").onclick = async () => {
         : await api("send", payload);
       rememberEdit(to, gen, composeQuote ? sent.split(composeQuote)[0] : sent);
       rememberTone(to, settings.level);
+      rememberName(to, sent);            // 実際に書いた宛名を正とする
       if(thread) dropTodo(thread);
       renderFilters();
       banner("送信しました" + (r.from ? "（差出人: " + r.from + "）" : ""));
@@ -2587,6 +2625,7 @@ ${settings.apiKey ? `保存されている値: ${settings.apiKey.length}文字 /
     <div class="sh-sec">書き方の学習</div>
     <div class="sh-row"><div class="k"><div class="n">手本 ${Object.keys(settings.samples||{}).length}件 ／ 直しの記録 ${(settings.edits||[]).length}件</div>
       <div class="d">相手ごとに過去の送信メールを手本として覚え、生成に使います。生成案を直して送ると、その差分も覚えます。
+宛名は ${Object.keys(settings.names||{}).length}人ぶん覚えています。
 覚え違いが気になるときは消してください。次から取り直します。</div></div>
       <button class="sh-btn danger" id="btnForget">忘れる</button></div>
 
@@ -2642,7 +2681,7 @@ ${settings.apiKey ? `保存されている値: ${settings.apiKey.length}文字 /
   $("btnRescan").onclick = () => { settings.scan = {}; flush(); renderSheet(); };
   $("btnTriage").onclick = () => { settings.aiTriage = !settings.aiTriage; flush(); renderSheet(); };
   $("btnPre").onclick = () => { settings.preflight = !settings.preflight; flush(); renderSheet(); };
-  $("btnForget").onclick = () => { settings.samples = {}; settings.edits = []; flush(); renderSheet(); };
+  $("btnForget").onclick = () => { settings.samples = {}; settings.edits = []; settings.names = {}; flush(); renderSheet(); };
   $("inKey").oninput = e => { settings.apiKey = e.target.value.replace(/\s+/g, ""); save(); };
   $("btnFast").onclick = () => { settings.fast = !settings.fast; flush(); renderSheet(); };
   $("inMemo").oninput = e => { settings.memo = e.target.value; save(); };
