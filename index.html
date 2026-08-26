@@ -330,7 +330,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "2026-08-26 09:35";   // 設定の一番下に出る。読み込まれているファイルの確認用。
+const BUILD = "2026-08-26 09:55";   // 設定の一番下に出る。読み込まれているファイルの確認用。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -650,9 +650,19 @@ let inboxAll = [];   // 受信箱の生データ。要返信の絞り込みに�
 
 // 返信待ちの判定：最後が相手からで、自分が Cc ではなく To に入っていて、まだ片付けていないもの
 function doneKey(t){ return t.id + "|" + (t.msgId || ""); }
+// 一斉メールを外し、自分に宛てたものだけを拾う
+const BROADCAST = /^\s*(各位|関係各位|皆様|皆さま|みなさま|みなさん|ご担当者|担当者)/;
+const MY_NAME = /高崎|takasaki/i;
 function addressedToMe(t){
-  const to = t.toAll || t.to || "";      // toAll は Apps Script 側の対応後に入る
-  return MINE.test(to);
+  const head = String(t.body || "").replace(/\r/g, "")
+    .split("\n").filter(x => x.trim()).slice(0, 2).join(" ");
+  if(BROADCAST.test(head)) return false;   // 「各位」で始まるものは一斉メール
+  if(MY_NAME.test(head)) return true;      // 冒頭で名指しされていれば確実に自分宛て
+
+  const to = addrList(t.toAll || t.to || "");
+  const cc = addrList(t.ccAll || "");
+  if(!to.some(p => MINE.test(p.addr || ""))) return false;   // To に自分がいない
+  return (to.length + cc.length) <= 4;     // 宛先が少人数なら個別のやり取りとみなす
 }
 function needsReply(t){
   return !MINE.test(t.addr || "") && addressedToMe(t) && !settings.done[doneKey(t)];
