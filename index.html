@@ -81,6 +81,13 @@ input,textarea{font-family:inherit;font-size:inherit;color:inherit}
 .list-scroll{flex:1;min-width:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain}
 .filters{flex:0 0 auto;display:flex;gap:7px;padding:8px 12px;border-bottom:1px solid var(--hairline);background:var(--pane-bg)}
 .filters .chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+.bulk{flex:0 0 auto;display:flex;align-items:center;gap:7px;padding:8px 12px;border-bottom:1px solid var(--hairline);
+  background:var(--fill);font-size:12px;color:var(--text-2)}
+.chip.danger{color:#d70015;border-color:rgba(215,0,21,.35)}
+.pick{flex:0 0 auto;width:22px;height:22px;border-radius:50%;border:1.5px solid var(--hairline);
+  display:flex;align-items:center;justify-content:center;margin:2px 0 0 6px;color:transparent}
+.pick[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+.pick .icon{width:12px;height:12px}
 .row-done{flex:0 0 auto;width:28px;height:28px;border-radius:50%;border:1.5px solid var(--hairline);
   display:flex;align-items:center;justify-content:center;color:var(--text-3);margin:2px 0 0 6px}
 .row-done:hover{border-color:var(--accent);color:var(--accent)}
@@ -246,6 +253,14 @@ button.rd-meta:hover .rd-to{color:var(--accent)}
     <div class="filters">
       <button class="chip" id="fInbox">受信</button>
       <button class="chip" id="fTodo">要返信</button>
+      <button class="chip" id="fDrafts">下書き</button>
+      <button class="chip" id="fPick" style="margin-left:auto">選択</button>
+    </div>
+    <div class="bulk" id="bulk" hidden>
+      <span id="bulkN">0件</span>
+      <button class="chip" id="bulkArch">アーカイブ</button>
+      <button class="chip" id="bulkDone">返信不要</button>
+      <button class="chip danger" id="bulkTrash">削除</button>
     </div>
     <div class="list-scroll" id="listScroll" role="listbox" aria-label="メッセージ一覧"></div>
   </section>
@@ -260,6 +275,15 @@ button.rd-meta:hover .rd-to{color:var(--accent)}
       </button>
       <button class="tb-btn" id="btnReplyAll" title="全員に返信" aria-label="全員に返信">
         <svg class="icon" viewBox="0 0 24 24"><path d="M8 7 3 12l5 5"/><path d="M13 7l-5 5 5 5"/><path d="M8 12h7a6 6 0 0 1 6 6v1"/></svg>
+      </button>
+      <button class="tb-btn" id="btnForward" title="転送" aria-label="転送">
+        <svg class="icon" viewBox="0 0 24 24"><path d="M14 5l6 6-6 6"/><path d="M20 11H7a3 3 0 0 0-3 3v4"/></svg>
+      </button>
+      <button class="tb-btn" id="btnUnread" title="未読に戻す" aria-label="未読に戻す">
+        <svg class="icon" viewBox="0 0 24 24"><path d="M3 7h18v11H3z"/><path d="M3 7l9 6 9-6"/></svg>
+      </button>
+      <button class="tb-btn" id="btnTrash" title="削除" aria-label="削除">
+        <svg class="icon" viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13"/></svg>
       </button>
       <button class="tb-btn" id="btnArchive" title="アーカイブ" aria-label="アーカイブ">
         <svg class="icon" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg>
@@ -345,7 +369,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v5";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v6";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -719,6 +743,9 @@ let lastIntent = null, lastGenerated = "";
 let currentDrafts = null, draftsBusy = false, draftsError = "", streamText = "";
 let openMsgs = {};   // メールごとの開閉。既定は最新だけ開く。
 let inboxAll = [];   // 受信箱の生データ。要返信の絞り込みに使う。
+let picking = false, picked = {};   // 複数選択
+let composeMode = "mail";           // "mail" か "forward"
+let forwardMsgId = "";
 
 // 返信待ちの判定：最後が相手からで、自分が Cc ではなく To に入っていて、まだ片付けていないもの
 function doneKey(t){ return t.id + "|" + (t.msgId || ""); }
@@ -848,12 +875,41 @@ function onLevelChanged(){
 
 function renderFilters(){
   const n = (settings.todo || []).length;
-  $("fInbox").setAttribute("aria-pressed", currentBox !== "TODO");
+  $("fInbox").setAttribute("aria-pressed", currentBox === "INBOX");
   $("fTodo").setAttribute("aria-pressed", currentBox === "TODO");
+  $("fDrafts").setAttribute("aria-pressed", currentBox === "DRAFTS2");
+  $("fPick").setAttribute("aria-pressed", picking);
   $("fTodo").textContent = n ? "要返信 " + n : "要返信";
+  const sel = Object.keys(picked).length;
+  $("bulk").hidden = !picking;
+  $("bulkN").textContent = sel + "件";
 }
 $("fInbox").onclick = () => { if(currentBox === "INBOX") return; currentBox = "INBOX"; currentId = null; current = null; load(); };
 $("fTodo").onclick  = () => { if(currentBox === "TODO") return; currentBox = "TODO"; currentId = null; current = null; load(); };
+$("fDrafts").onclick = () => { if(currentBox === "DRAFTS2") return; currentBox = "DRAFTS2"; currentId = null; current = null; load(); };
+$("fPick").onclick = () => { picking = !picking; picked = {}; renderFilters(); renderList(); };
+
+// まとめて処理する
+async function bulk(fn, label){
+  const ids = Object.keys(picked);
+  if(!ids.length) return;
+  banner(label + "しています…");
+  let ng = 0;
+  for(const id of ids){
+    try { await fn(id); } catch(e){ ng++; }
+  }
+  threads = threads.filter(t => !picked[t.id]);
+  picked = {}; picking = false;
+  renderFilters(); renderList();
+  banner(ng ? (label + "できなかったものが" + ng + "件あります。") : (ids.length + "件を" + label + "しました。"));
+  setTimeout(() => banner(""), 3500);
+}
+$("bulkArch").onclick  = () => bulk(async id => { await api("archive", { id }); dropTodo(id); }, "アーカイブ");
+$("bulkTrash").onclick = () => bulk(async id => { await api("trash", { id }); dropTodo(id); }, "削除");
+$("bulkDone").onclick  = () => bulk(async id => {
+  const t = threads.find(x => x.id === id);
+  if(t){ settings.done[doneKey(t)] = 1; dropTodo(id); }
+}, "返信不要に");
 
 function renderSidebar(){
   $("sbScroll").innerHTML = `<div class="sb-head">${esc(ACCOUNT)}</div>` + MAILBOXES.map(b => {
@@ -884,8 +940,10 @@ function renderList(){
         <span class="subj">${esc(m.subject)}</span>
         <span class="prev">${esc(String(m.body||"").replace(/\n+/g," "))}</span>
       </span>
-      ${currentBox === "TODO" ? `<button class="row-done" data-done="${esc(m.id)}" aria-label="返信不要にする">
-        <svg class="icon" viewBox="0 0 24 24"><path d="m5 12 5 5 9-10"/></svg></button>` : ""}
+      ${picking ? `<button class="pick" data-pick="${esc(m.id)}" aria-pressed="${!!picked[m.id]}" aria-label="選ぶ">
+        <svg class="icon" viewBox="0 0 24 24"><path d="m5 12 5 5 9-10"/></svg></button>`
+        : (currentBox === "TODO" ? `<button class="row-done" data-done="${esc(m.id)}" aria-label="返信不要にする">
+        <svg class="icon" viewBox="0 0 24 24"><path d="m5 12 5 5 9-10"/></svg></button>` : "")}
     </div>`).join("");
   if(currentBox !== "TODO" && threads.length >= 25){
     el.insertAdjacentHTML("beforeend", `<button class="more" id="btnMore">さらに読み込む</button>`);
@@ -901,7 +959,27 @@ function renderList(){
       }catch(e){ banner("読み込めませんでした。" + e.message); b.textContent = "さらに読み込む"; b.disabled = false; }
     };
   }
-  el.querySelectorAll("[data-id]").forEach(r => r.onclick = () => open(r.dataset.id));
+  el.querySelectorAll("[data-pick]").forEach(b => b.onclick = (e) => {
+    e.stopPropagation();
+    const id = b.dataset.pick;
+    if(picked[id]) delete picked[id]; else picked[id] = 1;
+    b.setAttribute("aria-pressed", !!picked[id]);
+    renderFilters();
+  });
+  el.querySelectorAll("[data-id]").forEach(r => r.onclick = () => {
+    if(picking){
+      const id = r.dataset.id;
+      if(picked[id]) delete picked[id]; else picked[id] = 1;
+      renderList(); renderFilters(); return;
+    }
+    if(currentBox === "DRAFTS2"){
+      const d = threads.find(t => t.id === r.dataset.id);
+      if(d) openCompose({ to:d.to, cc:d.cc, subject:d.subject, body:d.body,
+        draftId:d.draftId, title:"下書き" });
+      return;
+    }
+    open(r.dataset.id);
+  });
   el.querySelectorAll("[data-done]").forEach(b => b.onclick = (e) => {
     e.stopPropagation();
     const t = threads.find(x => x.id === b.dataset.done);
@@ -939,6 +1017,7 @@ function renderReader(){
   if(!current){
     $("aiBar").hidden = true; $("btnReply").disabled = true;
     $("btnReplyAll").disabled = true; $("btnArchive").disabled = true;
+    $("btnForward").disabled = true; $("btnUnread").disabled = true; $("btnTrash").disabled = true;
     updateDock();
     scroll.innerHTML = `<div class="empty" style="height:100%">
       <svg class="icon" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3.5 7 8.5 6 8.5-6"/></svg>
@@ -949,6 +1028,7 @@ function renderReader(){
   const canReply = !!replyTarget();
   $("btnReply").disabled = !canReply; $("btnReplyAll").disabled = !canReply;
   $("btnArchive").disabled = false; $("aiBar").hidden = !canReply;
+  $("btnForward").disabled = false; $("btnUnread").disabled = false; $("btnTrash").disabled = false;
   renderSeg($("rpSeg"));
   // 新しい順に並べる。いま読んでいるメールが必ず先頭。
   const msgs = (current.messages || []).slice().reverse();
@@ -1172,6 +1252,8 @@ async function load(){
   // 前回の一覧をすぐ出して、裏で最新に差し替える。
   if(currentBox === "TODO"){
     threads = (settings.todo || []).slice();   // 保存してあるものを即座に出す
+  } else if(currentBox === "DRAFTS2"){
+    threads = [];
   } else if(!query){
     const raw = store.get(key);
     if(raw){ try { threads = JSON.parse(raw) || []; } catch(e){} }
@@ -1179,8 +1261,17 @@ async function load(){
   loading = !threads.length;
   renderSidebar(); renderList();
   try{
+    if(currentBox === "DRAFTS2"){
+      const dr = await api("drafts", {});
+      threads = (dr.drafts || []).map(d => ({
+        id: d.draftId, draftId: d.draftId, from: d.to || "(宛先なし)", addr: d.to || "",
+        to: d.to, cc: d.cc, subject: d.subject, date: d.date, body: d.body, unread: false
+      }));
+      renderFilters();
+      return;
+    }
     const box = currentBox === "TODO" ? "INBOX" : currentBox;
-    const r = await api("threads", { box, query, limit: currentBox === "TODO" ? 50 : 25 });
+    const r = await api("threads", { box, query, all: !!query, limit: currentBox === "TODO" ? 50 : 25 });
     const all = r.threads || [];
     if(box === "INBOX"){ inboxAll = all; if(!query) mergeTodo(all); }
     threads = currentBox === "TODO" ? (settings.todo || []).slice() : all;
@@ -1334,6 +1425,7 @@ function ensureSig(body){
 function openCompose(o = {}){
   composeSource = o.source || null; composeThread = o.threadId || null; composeAll = !!o.all;
   composeFiles = o.files || []; composeDraftId = o.draftId || "";
+  if(o.title !== "転送") composeMode = "mail";
   renderFiles();
   $("cpTitle").textContent = o.title || "新規メッセージ";
   $("cpTo").value = o.to || ""; $("cpCc").value = o.cc || "";
@@ -1377,6 +1469,45 @@ function openReply(all){
 }
 $("btnReply").onclick = () => openReply(false);
 $("btnReplyAll").onclick = () => openReply(true);
+$("btnForward").onclick = () => {
+  const m = current && current.messages && current.messages[current.messages.length - 1];
+  if(!m) return;
+  composeMode = "forward"; forwardMsgId = m.id;
+  openCompose({ to:"", cc:"", subject:"Fwd: " + (current.subject || ""),
+    body:"", title:"転送" });
+  $("cpHint").textContent = "ひとこと添えられます。元のメールと添付はそのまま付きます。";
+};
+
+$("btnUnread").onclick = async () => {
+  if(!currentId) return;
+  const id = currentId;
+  try{
+    await api("unread", { id });
+    const t = threads.find(x => x.id === id);
+    if(t) t.unread = true;
+    document.body.classList.remove("reading");
+    currentId = null; current = null;
+    renderList(); renderReader(); updateDock();
+    banner("未読に戻しました");
+    setTimeout(() => banner(""), 2500);
+  }catch(e){ banner("戻せませんでした。" + e.message); }
+};
+
+$("btnTrash").onclick = async () => {
+  if(!currentId) return;
+  const id = currentId;
+  try{
+    await api("trash", { id });
+    threads = threads.filter(t => t.id !== id);
+    dropTodo(id);
+    currentId = null; current = null;
+    document.body.classList.remove("reading");
+    renderList(); renderReader(); renderFilters(); updateDock();
+    banner("削除しました");
+    setTimeout(() => banner(""), 2500);
+  }catch(e){ banner("削除できませんでした。" + e.message); }
+};
+
 $("btnArchive").onclick = async () => {
   if(!currentId) return;
   const id = currentId;
@@ -1440,6 +1571,8 @@ $("cpSend").onclick = () => {
   };
   const to = payload.to;
   const gen = lastGenerated, sent = payload.body, thread = composeThread;
+  const mode = composeMode, fwdId = forwardMsgId;
+  composeMode = "mail";
 
   clearTimeout(draftTimer);
   settings.draft = null; flush();
@@ -1461,7 +1594,9 @@ $("cpSend").onclick = () => {
     const b = $("banner"); b.onclick = null; b.style.cursor = "";
     banner("送信中…");
     try{
-      const r = await api("send", payload);
+      const r = mode === "forward"
+        ? await api("forward", { msgId: fwdId, to: payload.to, cc: payload.cc, note: payload.body })
+        : await api("send", payload);
       rememberEdit(to, gen, sent);
       if(thread) dropTodo(thread);
       renderFilters();
