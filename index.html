@@ -478,7 +478,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v36";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v37";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -668,7 +668,7 @@ let saveTimer = null;
 const save  = () => { clearTimeout(saveTimer); saveTimer = setTimeout(flush, 400); };
 // 保存の形を変えたときは、古い保存を捨ててやり直す。
 // 混ざったまま使うと、表示が欠けたり順序が壊れたりする。
-const CACHE_VER = "4";
+const CACHE_VER = "5";
 function resetCachesIfNeeded(){
   let cur = null;
   try { cur = localStorage.getItem("mail.cachever"); } catch(e){ return; }
@@ -1661,10 +1661,15 @@ async function load(opts){
     }
     // 取れたものをそのまま映す。保存の成否に画面を左右させない。
     if(raw.length){
-      threads = boxView(raw);
-      if(!query) writeCache(key, raw);
-      const merged = query ? null : readCache(key);
-      if(merged && merged.length >= raw.length) threads = boxView(merged);
+      const fresh = boxView(raw);
+      threads = fresh;
+      if(!query){
+        writeCache(key, raw);
+        // 比べるのは「絞り込んだあとの件数」。生の件数で比べると、
+        // 古い形式の行が多いだけで正しい結果を捨ててしまう。
+        const merged = boxView(readCache(key));
+        if(merged.length >= fresh.length) threads = merged;
+      }
     } else if(!query){
       threads = boxView(readCache(key));   // 空の取得では手元のものを出す
     }
@@ -1745,8 +1750,12 @@ function readCache(key){
 function writeCache(key, fresh){
   if(key === "cache.TODO") return;          // 要返信は mergeTodo が持つ
   if(!fresh || !fresh.length) return;       // 空の取得は無視する
+  const want = key.slice("cache.".length);
   try{
-    const old = readCache(key);
+    // その箱のものだけを残す。古い形式や別の箱の行を持ち込まない。
+    fresh = fresh.filter(t => t.box === want);
+    if(!fresh.length) return;
+    const old = readCache(key).filter(t => t.box === want);
     const seen = {}, out = [];
     (fresh || []).forEach(t => { if(!seen[t.id]){ seen[t.id] = 1; out.push(t); } });
     old.forEach(t => { if(!seen[t.id]){ seen[t.id] = 1; out.push(t); } });
