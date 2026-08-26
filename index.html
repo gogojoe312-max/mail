@@ -276,6 +276,35 @@ button.rd-meta:hover .rd-to{color:var(--accent)}
 .cp-quote[open] summary::before{content:"▾ "}
 .cp-quote .q{max-height:38vh;overflow:auto;padding:0 16px 14px;font-size:12.5px;line-height:1.55;
   white-space:pre-wrap;color:var(--text-2);overflow-wrap:anywhere}
+
+/* ---- 文字の大きさを Gmail 並みに ---- */
+.row .from{font-size:16px;font-weight:600}
+.row .subj{font-size:15px}
+.row .prev{font-size:14px;line-height:1.45}
+.row .date{font-size:13px}
+.rd-subj{font-size:21px;line-height:1.35}
+.rd-name{font-size:16px}
+.rd-to{font-size:13px}
+.rd-date{font-size:13px}
+.rd-body{font-size:16px;line-height:1.75}
+.rd-snippet{font-size:14px}
+.rd-quote{font-size:14px;line-height:1.6}
+.draft-body{font-size:15.5px;line-height:1.7}
+.cp-body{font-size:16.5px;line-height:1.7}
+.cp-field input{font-size:16px}
+.dk-in{font-size:16.5px}
+.chip{font-size:14px}
+.sh-row .n{font-size:15px}
+.sh-row .d{font-size:13px}
+.empty .t{font-size:16px}
+.empty .s{font-size:14px}
+@media (hover:none){
+  .row .from{font-size:17px}
+  .row .subj{font-size:16px}
+  .row .prev{font-size:14.5px}
+  .rd-body{font-size:17px}
+  .cp-body{font-size:17px}
+}
 </style>
 </head>
 <body>
@@ -386,10 +415,6 @@ button.rd-meta:hover .rd-to{color:var(--accent)}
   <div class="cp-field"><span class="k">件名</span><input id="cpSubj" autocomplete="off"></div>
   <div class="files" id="cpFiles" hidden></div>
   <textarea class="cp-body" id="cpBody" placeholder="本文"></textarea>
-  <details class="cp-quote" id="cpQuote" hidden>
-    <summary id="cpQuoteHead">元のメールを見る</summary>
-    <div class="q" id="cpQuoteBody"></div>
-  </details>
   <div class="cp-foot">
     <span class="cp-hint">敬語</span>
     <div class="seg" id="cpSeg" role="group" aria-label="敬語の強さ"></div>
@@ -442,7 +467,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v22";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v23";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -1807,7 +1832,15 @@ async function quick(){
 
 /* ---------- 作成 ---------- */
 let composeSource = null, composeThread = null, composeAll = false;
-let composeFiles = [], composeDraftId = "", draftTimer = null;
+let composeFiles = [], composeDraftId = "", draftTimer = null, composeQuote = "";
+
+// Gmail と同じように、本文の下に元のやり取りを引用として置く
+function quoteBlock(m){
+  if(!m || !(m.body || m.from)) return "";
+  const head = (m.date || "") + " " + (m.from || "") + " <" + (m.addr || "") + ">:";
+  const body = String(m.body || "").replace(/\r/g, "").split("\n").map(l => "> " + l).join("\n");
+  return "\n\n" + head + "\n" + body;
+}
 
 function renderFiles(){
   const box = $("cpFiles");
@@ -1853,7 +1886,7 @@ function saveDraft(){
     if(!$("compose").classList.contains("on")) return;
     const d = {
       to: $("cpTo").value, cc: $("cpCc").value, subject: $("cpSubj").value,
-      body: $("cpBody").value, threadId: composeThread, all: composeAll,
+      body: $("cpBody").value, noQuote: true, threadId: composeThread, all: composeAll,
       title: $("cpTitle").textContent, draftId: composeDraftId,
       files: composeFiles.map(f => ({ name:f.name, type:f.type, size:f.size, data:f.data })),
       at: Date.now()
@@ -1878,23 +1911,15 @@ function openCompose(o = {}){
   composeSource = o.source || null; composeThread = o.threadId || null; composeAll = !!o.all;
   composeFiles = o.files || []; composeDraftId = o.draftId || "";
   if(o.title !== "転送") composeMode = "mail";
-  // 返信中も元のメールを読み返せるようにする
+  // 本文の下に、これまでのやり取りを引用として置く
   const q = o.quote || (composeSource && composeSource.msg) || (o.threadId ? replyTarget() : null);
-  if(q && (q.body || q.from)){
-    $("cpQuote").hidden = false;
-    $("cpQuote").open = false;
-    $("cpQuoteHead").textContent = "元のメールを見る（" + (q.from || "") + "）";
-    $("cpQuoteBody").textContent = splitQuote(q.body || "").main;
-  } else {
-    $("cpQuote").hidden = true;
-    $("cpQuoteBody").textContent = "";
-  }
+  composeQuote = o.noQuote ? "" : quoteBlock(q);
   renderFiles();
   $("cpTitle").textContent = o.title || "新規メッセージ";
   $("cpTo").value = o.to || ""; $("cpCc").value = o.cc || "";
   $("cpSubj").value = o.subject || "";
   const withSig = ensureSig(o.body || "");
-  $("cpBody").value = withSig;
+  $("cpBody").value = withSig + composeQuote;
   lastGenerated = withSig;
   $("cpHint").textContent = ""; renderSeg($("cpSeg"));
   $("compose").classList.add("on"); $("scrim").classList.add("on");
@@ -2016,7 +2041,7 @@ async function redo(){
     }
     if(text){
       const t = ensureSig(text);
-      $("cpBody").value = t; lastGenerated = t;
+      $("cpBody").value = t + composeQuote; lastGenerated = t;
     }
     $("cpHint").textContent = "文体：" + L().name;
   }catch(e){ $("cpHint").textContent = e.message; }
@@ -2131,7 +2156,8 @@ $("cpSend").onclick = async () => {
   // 直前に点検で止めた場合は、次の押下では素通しする
   if(Date.now() > skipCheckUntil && settings.preflight && settings.apiKey){
     $("cpHint").textContent = "点検しています…";
-    const issues = await preflight($("cpBody").value, $("cpTo").value);
+    const bodyOnly = composeQuote ? $("cpBody").value.split(composeQuote)[0] : $("cpBody").value;
+    const issues = await preflight(bodyOnly, $("cpTo").value);
     if(issues.length){
       skipCheckUntil = Date.now() + 120000;
       $("cpHint").textContent = "点検: " + issues.join(" ／ ") + "　もう一度押すとこのまま送ります";
@@ -2178,7 +2204,7 @@ $("cpSend").onclick = async () => {
       const r = mode === "forward"
         ? await api("forward", { msgId: fwdId, to: payload.to, cc: payload.cc, note: payload.body })
         : await api("send", payload);
-      rememberEdit(to, gen, sent);
+      rememberEdit(to, gen, composeQuote ? sent.split(composeQuote)[0] : sent);
       rememberTone(to, settings.level);
       if(thread) dropTodo(thread);
       renderFilters();
