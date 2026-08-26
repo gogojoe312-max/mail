@@ -432,7 +432,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v17";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v18";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -598,7 +598,7 @@ function migrate(raw){
   if(v < 12){
     if(!d.tone || typeof d.tone !== "object") d.tone = {};
     if(!d.triage || typeof d.triage !== "object") d.triage = {};
-    if(typeof d.aiTriage !== "boolean") d.aiTriage = true;
+    if(typeof d.aiTriage !== "boolean") d.aiTriage = false;
     if(typeof d.preflight !== "boolean") d.preflight = true;
   }
   if(v < 13){ if(!d.waitDone || typeof d.waitDone !== "object") d.waitDone = {}; }
@@ -612,7 +612,7 @@ let settings = migrate(store.get(KEY)) || {
   schema: SCHEMA, level:"mid", memo:"", endpoint:"", token:"", fast:false, apiKey:"",
   terms: DEFAULT_TERMS.slice(), intents: DEFAULT_INTENTS.slice(), done: {}, todo: [],
   samples: {}, edits: [], rev: 0, draft: null,
-  tone: {}, triage: {}, aiTriage: true, preflight: true, waitDone: {}
+  tone: {}, triage: {}, aiTriage: false, preflight: true, waitDone: {}
 };
 
 let saveTimer = null;
@@ -820,26 +820,21 @@ let forwardMsgId = "";
 
 // 返信待ちの判定：最後が相手からで、自分が Cc ではなく To に入っていて、まだ片付けていないもの
 function doneKey(t){ return t.id + "|" + (t.msgId || ""); }
-// 一斉メールを外し、自分に宛てたものだけを拾う
-const BROADCAST = /^\s*(各位|関係各位|皆様|皆さま|みなさま|みなさん|ご担当者|担当者)/;
-const MY_NAME = /高崎|takasaki/i;
+// 自分に宛てたものだけを拾う。
+// 本文の書き出しで判断していたが、一覧の本文は改行の潰れた抜粋なので当てにならず、
+// 署名の自分の名前まで拾って揺れていた。宛先だけで決める。
 function addressedToMe(t){
-  const head = String(t.body || "").replace(/\r/g, "")
-    .split("\n").filter(x => x.trim()).slice(0, 2).join(" ");
-  if(BROADCAST.test(head)) return false;   // 「各位」で始まるものは一斉メール
-  if(MY_NAME.test(head)) return true;      // 冒頭で名指しされていれば確実に自分宛て
-
   const to = addrList(t.toAll || t.to || "");
   const cc = addrList(t.ccAll || "");
   if(!to.some(p => MINE.test(p.addr || ""))) return false;   // To に自分がいない
-  return (to.length + cc.length) <= 4;     // 宛先が少人数なら個別のやり取りとみなす
+  return (to.length + cc.length) <= 8;     // 宛先が少人数なら個別のやり取りとみなす
 }
 function needsReply(t){
   if(MINE.test(t.addr || "")) return false;
   if(settings.done[doneKey(t)]) return false;
-  const judged = (settings.triage || {})[t.msgId];
-  if(judged !== undefined) return judged === 1;   // AIの判定があればそちらを使う
-  return addressedToMe(t);
+  if(addressedToMe(t)) return true;
+  // AI判定は「拾い足す」だけに使う。既に入っているものを後から消さない。
+  return (settings.triage || {})[t.msgId] === 1;
 }
 // 要返信は端末に貯める。取得できた範囲の外に出ても消えないようにする。
 // 相手ごとの文体を覚える。開いた瞬間にその相手の温度に切り替わる。
@@ -897,8 +892,9 @@ function mergeTodo(fetched){
   (settings.todo || []).forEach(t => keep[t.id] = t);
   // 今回取得できたものは状態が確定する。返信済み・対象外になったものは落とす。
   fetched.forEach(t => {
-    if(needsReply(t)) keep[t.id] = slimThread(t);
-    else delete keep[t.id];
+    if(needsReply(t)){ keep[t.id] = slimThread(t); return; }
+    // 消すのは「自分が返した」「片付けた」ときだけ。判定が揺れても消さない。
+    if(MINE.test(t.addr || "") || settings.done[doneKey(t)]) delete keep[t.id];
   });
   const seen = {}, out = [];
   fetched.forEach(t => { if(keep[t.id] && !seen[t.id]){ out.push(keep[t.id]); seen[t.id] = 1; } });
@@ -1513,14 +1509,14 @@ async function load(opts){
 
   // 2. 取ったばかりなら取りに行かない。切り替えただけで待たされないようにする。
   const age = Date.now() - Number(store.get(key + ".at") || 0);
-  if(!force && !query && threads.length && age < 90000){
+  if(!force && !query && threads.length && age < 600000){
     loading = false;
     renderList();
     if(currentBox === "INBOX") setTimeout(() => prefetchTop(threads), 1500);
     return;
   }
 
-  $("pullHint").hidden = false; $("pullHint").textContent = "更新中";
+  if(!threads.length){ $("pullHint").hidden = false; $("pullHint").textContent = "更新中"; }
   try{
     let raw;
     if(currentBox === "DRAFTS2"){
@@ -1532,6 +1528,7 @@ async function load(opts){
     } else {
       const box = currentBox === "TODO" ? "INBOX" : (currentBox === "WAIT" ? "SENT" : currentBox);
       const r = await api("threads", { box, query, all: !!query,
+        full: currentBox === "WAIT",   // 相手の返信も含めた最後の1通が要る
         limit: currentBox === "TODO" ? 20 : 15 });
       raw = r.threads || [];
       if(box === "INBOX" && !query){
@@ -2429,9 +2426,11 @@ document.addEventListener("visibilitychange", () => {
 let refreshTimer = null;
 function autoRefresh(){
   clearInterval(refreshTimer);
-  refreshTimer = setInterval(() => { if(!document.hidden && connected()) load(); }, 60000);
+  refreshTimer = setInterval(() => {
+    if(!document.hidden && connected() && currentBox === "INBOX") load();
+  }, 120000);
 }
-document.addEventListener("visibilitychange", () => { if(!document.hidden && connected()) load(); });
+document.addEventListener("visibilitychange", () => { if(!document.hidden && connected() && currentBox === "INBOX") load(); });
 addEventListener("pageshow", () => { if(connected()) load(); });
 autoRefresh();
 
