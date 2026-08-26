@@ -211,6 +211,9 @@ button.rd-meta:hover .rd-to{color:var(--accent)}
 .sh-btn.danger.armed{background:#d70015;border-color:#d70015;color:#fff}
 .status{font-size:12px;color:var(--text-2);padding:8px 0 0;line-height:1.55}
 .sig-box{margin-top:7px;padding:10px 12px;border:1px solid var(--hairline);border-radius:8px;background:var(--fill);font-size:12.5px;line-height:1.7;white-space:pre-wrap}
+.bn-btn{margin-left:10px;height:28px;padding:0 12px;border-radius:14px;border:1px solid currentColor;
+  font-size:12px;color:inherit;background:none;touch-action:manipulation}
+.bn-btn:active{opacity:.6}
 .banner{padding:7px 16px;font-size:12px;background:#fff4d6;color:#6b4e00;border-bottom:1px solid var(--hairline);display:none}
 .banner.on{display:block}
 @media (prefers-color-scheme:dark){.banner{background:#3a2f10;color:#f0d78a}}
@@ -391,6 +394,7 @@ button.rd-meta:hover .rd-to{color:var(--accent)}
     <span class="cp-hint">敬語</span>
     <div class="seg" id="cpSeg" role="group" aria-label="敬語の強さ"></div>
     <button class="chip" id="cpAttach">添付</button>
+    <button class="chip danger" id="cpDrop">捨てる</button>
     <button class="chip" id="cpLater">時間を指定</button>
     <input type="file" id="cpFileInput" multiple hidden>
     <button class="chip" id="cpRedo">この文体で書き直す</button>
@@ -438,7 +442,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v21";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v22";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -976,7 +980,7 @@ const fileSize = n => n > 1048576 ? (n/1048576).toFixed(1) + "MB"
   : n > 1024 ? Math.round(n/1024) + "KB" : (n || 0) + "B";
 const esc = s => String(s === null || s === undefined ? "" : s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const $ = id => document.getElementById(id);
-const banner = t => { const b = $("banner"); b.textContent = t || ""; b.classList.toggle("on", !!t); };
+const banner = t => { const b = $("banner"); b.innerHTML = ""; b.textContent = t || ""; b.classList.toggle("on", !!t); };
 
 function renderSeg(el){
   el.innerHTML = LEVEL_ORDER.map(k =>
@@ -1815,6 +1819,17 @@ function renderFiles(){
   });
 }
 ["cpTo","cpCc","cpSubj","cpBody"].forEach(id => $(id).addEventListener("input", saveDraft));
+$("cpDrop").onclick = () => {
+  clearTimeout(draftTimer);
+  const id = composeDraftId;
+  settings.draft = null; flush();
+  if(id) api("draftDrop", { draftId: id }).catch(() => {});
+  composeFiles = []; composeDraftId = "";
+  $("cpTo").value = ""; $("cpCc").value = ""; $("cpSubj").value = ""; $("cpBody").value = "";
+  $("compose").classList.remove("on"); $("scrim").classList.remove("on");
+  banner("書きかけを捨てました");
+  setTimeout(() => banner(""), 2500);
+};
 $("cpAttach").onclick = () => $("cpFileInput").click();
 $("cpFileInput").onchange = async () => {
   const list = [...($("cpFileInput").files || [])];
@@ -1894,14 +1909,26 @@ const closeCompose = () => {
 function offerDraft(){
   const d = settings.draft;
   if(!d) return;
-  banner("書きかけがあります（" + (d.to || d.subject || "件名なし") + "）。タップで開きます。");
   const b = $("banner");
-  b.style.cursor = "pointer";
-  b.onclick = () => {
-    b.onclick = null; b.style.cursor = "";
-    banner("");
-    openCompose(d);
+  b.innerHTML = `書きかけがあります（${esc(d.to || d.subject || "件名なし")}）
+    <button class="bn-btn" id="bnOpen">開く</button>
+    <button class="bn-btn" id="bnDrop">捨てる</button>
+    <button class="bn-btn" id="bnLater">あとで</button>`;
+  b.classList.add("on");
+  $("bnOpen").onclick = () => { closeBanner(); openCompose(settings.draft || {}); };
+  $("bnLater").onclick = () => { closeBanner(); };
+  $("bnDrop").onclick = () => {
+    const id = settings.draft && settings.draft.draftId;
+    settings.draft = null; flush();
+    if(id) api("draftDrop", { draftId: id }).catch(() => {});   // Gmail の下書きも消す
+    closeBanner();
+    banner("書きかけを捨てました");
+    setTimeout(() => banner(""), 2500);
   };
+}
+function closeBanner(){
+  const b = $("banner");
+  b.innerHTML = ""; b.textContent = ""; b.classList.remove("on");
 }
 
 $("cpClose").onclick = closeCompose;
