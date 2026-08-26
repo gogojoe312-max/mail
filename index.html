@@ -478,7 +478,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v29";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v30";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -2015,7 +2015,14 @@ function openCompose(o = {}){
   lastGenerated = withSig;
   $("cpHint").textContent = ""; renderSeg($("cpSeg"));
   $("compose").classList.add("on"); $("scrim").classList.add("on");
-  ($(o.body ? "cpBody" : "cpTo")).focus();
+  if(typeof o.caret === "number"){
+    const el = $("cpBody");
+    el.focus();
+    try{ el.setSelectionRange(o.caret, o.caret); }catch(e){}
+    el.scrollTop = 0;
+  } else {
+    ($(o.body ? "cpBody" : "cpTo")).focus();
+  }
 }
 const closeCompose = () => {
   saveDraft();
@@ -2081,13 +2088,42 @@ $("cpClose").onclick = closeCompose;
 $("scrim").onclick = () => { closeCompose(); closeSheet(); closePeople(); closeCal(); };
 $("btnBack").onclick = () => { document.body.classList.remove("reading"); updateDock(); };
 $("btnRefresh").onclick = () => load({ force:true });
+// 相手の呼び名。会社名や括弧書きを外し、名字だけにする。
+function callName(m){
+  let n = String(m.from || "").replace(/\([^)]*\)/g, "").replace(/【[^】]*】/g, "").trim();
+  if(!n || n.indexOf("@") !== -1) return "";
+  const parts = n.split(/[\s　]+/).filter(Boolean);
+  if(parts.length > 1){
+    // 「UFW 柳澤武志」「柳澤 武志」→ 会社名らしき先頭を落として名字を採る
+    const jp = parts.filter(x => /[\u3040-\u30ff\u4e00-\u9fff]/.test(x));
+    n = jp.length ? jp[0] : parts[parts.length - 1];
+  }
+  // スペースの無い日本語のフルネームは、姓だけを取り出す。
+  // 過去にやり取りした宛名から学べるまでは、4文字なら前2文字を姓とみなす。
+  if(/^[\u3040-\u30ff\u4e00-\u9fff]+$/.test(n) && n.length === 4) n = n.slice(0, 2);
+  return n;
+}
+
+// 返信の下書き。書き出す場所を空けておく。
+function replySkeleton(m){
+  const name = callName(m);
+  const hon = settings.level === "strong" ? "様" : "さま";
+  const greet = /@[^@]*ufg/i.test(m.addr || "") ? "お疲れ様です。" : "お世話になっております。";
+  const close = settings.level === "strong" ? "何卒よろしくお願い申し上げます。"
+              : settings.level === "weak" ? "よろしくお願いします。"
+              : "よろしくお願いいたします。";
+  const head = (name ? name + hon + "\n\n" : "") + greet + "\n\n";
+  return { body: head + "\n\n" + close, caret: head.length };
+}
+
 function openReply(all){
   const m = replyTarget(); if(!m) return;
+  const sk = replySkeleton(m);
   openCompose({
     quote: m, to:m.addr, cc: all ? replyAllCc(m) : "",
     subject:/^Re:/i.test(m.subject||"")?m.subject:"Re: "+(m.subject||""),
     title: all ? "全員に返信" : "返信", threadId:current.id, all,
-    body:"\n\n" + SIGNATURE });
+    body: sk.body, caret: sk.caret });
 }
 $("btnReply").onclick = () => openReply(false);
 $("btnReplyAll").onclick = () => openReply(true);
