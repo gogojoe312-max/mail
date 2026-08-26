@@ -330,7 +330,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v3";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v4";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -448,7 +448,7 @@ function polish(body, counterpart){
 }
 
 /* ---------- 保存 ---------- */
-const KEY = "mailai.v1", SCHEMA = 9;
+const KEY = "mailai.v1", SCHEMA = 10;
 const store = (() => {
   let ok = false;
   try { localStorage.setItem("_t","1"); localStorage.removeItem("_t"); ok = true; } catch(e){}
@@ -491,6 +491,7 @@ function migrate(raw){
     if(!d.samples || typeof d.samples !== "object") d.samples = {};
     if(!Array.isArray(d.edits)) d.edits = [];
   }
+  if(v < 10){ d.rev = d.rev || 0; }
   d.schema = SCHEMA;
   if(!Array.isArray(d.intents) || !d.intents.length) d.intents = DEFAULT_INTENTS.slice();
   if(!LEVELS[d.level]) d.level = "mid";
@@ -500,7 +501,7 @@ function migrate(raw){
 let settings = migrate(store.get(KEY)) || {
   schema: SCHEMA, level:"mid", memo:"", endpoint:"", token:"", fast:false, apiKey:"",
   terms: DEFAULT_TERMS.slice(), intents: DEFAULT_INTENTS.slice(), done: {}, todo: [],
-  samples: {}, edits: []
+  samples: {}, edits: [], rev: 0
 };
 
 let saveTimer = null;
@@ -740,10 +741,51 @@ function mergeTodo(fetched){
   (settings.todo || []).forEach(t => { if(keep[t.id] && !seen[t.id]){ out.push(keep[t.id]); seen[t.id] = 1; } });
   settings.todo = out.slice(0, 200);
   flush();
+  pushState();
 }
+// 要返信の状態を端末間で同期する。保存先は Apps Script のプロパティ。
+let syncTimer = null;
+function slimForSync(t){
+  return { id:t.id, msgId:t.msgId, from:t.from, addr:t.addr,
+           subject:t.subject, date:t.date, body:String(t.body||"").slice(0,120),
+           toAll:t.toAll, ccAll:t.ccAll, unread:t.unread };
+}
+function pushState(){
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(async () => {
+    if(!connected()) return;
+    try{
+      settings.rev = (settings.rev || 0) + 1;
+      flush();
+      await api("stateSet", { state: JSON.stringify({
+        rev: settings.rev,
+        todo: (settings.todo || []).slice(0, 80).map(slimForSync),
+        done: settings.done || {}
+      })});
+    }catch(e){}
+  }, 1500);
+}
+async function pullState(){
+  if(!connected()) return;
+  try{
+    const r = await api("stateGet", {});
+    if(!r.state) return;
+    const rs = JSON.parse(r.state);
+    if(!rs || typeof rs !== "object") return;
+    if((rs.rev || 0) <= (settings.rev || 0)) return;   // こちらの方が新しければ触らない
+    settings.done = Object.assign({}, rs.done || {}, settings.done || {});
+    settings.todo = (rs.todo || []).filter(t => !settings.done[doneKey(t)]);
+    settings.rev = rs.rev || 0;
+    flush();
+    renderFilters();
+    if(currentBox === "TODO"){ threads = (settings.todo || []).slice(); renderList(); }
+  }catch(e){}
+}
+
 function dropTodo(id){
   settings.todo = (settings.todo || []).filter(t => t.id !== id);
   flush();
+  pushState();
 }
 
 function pruneDone(){
@@ -831,7 +873,7 @@ function renderList(){
     const t = threads.find(x => x.id === b.dataset.done);
     if(!t) return;
     settings.done[doneKey(t)] = 1;
-    pruneDone(); dropTodo(t.id); flush();
+    pruneDone(); dropTodo(t.id); flush(); pushState();
     threads = threads.filter(x => x.id !== t.id);
     renderList(); renderFilters();
   });
@@ -1483,7 +1525,12 @@ async function checkUpdate(){
   }catch(e){}
 }
 checkUpdate();
-document.addEventListener("visibilitychange", () => { if(!document.hidden) checkUpdate(); });
+pullState();
+document.addEventListener("visibilitychange", () => {
+  if(document.hidden) return;
+  checkUpdate();
+  pullState();
+});
 
 // 画面に戻ったときと、開いている間は1分ごとに受信箱を取り直す
 let refreshTimer = null;
