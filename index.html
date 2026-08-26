@@ -478,7 +478,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v35";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v36";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -668,7 +668,7 @@ let saveTimer = null;
 const save  = () => { clearTimeout(saveTimer); saveTimer = setTimeout(flush, 400); };
 // 保存の形を変えたときは、古い保存を捨ててやり直す。
 // 混ざったまま使うと、表示が欠けたり順序が壊れたりする。
-const CACHE_VER = "3";
+const CACHE_VER = "4";
 function resetCachesIfNeeded(){
   let cur = null;
   try { cur = localStorage.getItem("mail.cachever"); } catch(e){ return; }
@@ -1321,9 +1321,9 @@ function cacheThread(full){
   try{
     const slim = {
       id: full.id, subject: full.subject, total: full.total,
-      messages: (full.messages || []).slice(-6).map(m => ({
+      messages: (full.messages || []).slice(-4).map(m => ({
         id:m.id, from:m.from, addr:m.addr, to:m.to, cc:m.cc, date:m.date,
-        subject:m.subject, body:String(m.body||"").slice(0,4000), files:m.files || []
+        subject:m.subject, body:String(m.body||"").slice(0,2500), files:m.files || []
       }))
     };
     saveList("th." + full.id, slim);
@@ -1333,7 +1333,7 @@ function cacheThread(full){
       const k = localStorage.key(i);
       if(k && k.indexOf("th.") === 0) keys.push(k);
     }
-    if(keys.length > 150) keys.slice(0, keys.length - 150).forEach(k => localStorage.removeItem(k));
+    if(keys.length > 40) keys.slice(0, keys.length - 40).forEach(k => localStorage.removeItem(k));
   }catch(e){}
 }
 
@@ -1659,9 +1659,15 @@ async function load(opts){
         }, 1200);
       }
     }
-    if(!query) writeCache(key, raw);
-    // 取得が空でも画面を空にしない。積み上げてあるものを出す。
-    threads = query ? boxView(raw) : boxView(readCache(key));
+    // 取れたものをそのまま映す。保存の成否に画面を左右させない。
+    if(raw.length){
+      threads = boxView(raw);
+      if(!query) writeCache(key, raw);
+      const merged = query ? null : readCache(key);
+      if(merged && merged.length >= raw.length) threads = boxView(merged);
+    } else if(!query){
+      threads = boxView(readCache(key));   // 空の取得では手元のものを出す
+    }
     renderFilters();
     banner(connected() ? "" : "ウェブアプリが未接続です。設定からURLと合言葉を入れてください。（いまは見本を表示しています）");
   }catch(e){
@@ -1744,12 +1750,21 @@ function writeCache(key, fresh){
     const seen = {}, out = [];
     (fresh || []).forEach(t => { if(!seen[t.id]){ seen[t.id] = 1; out.push(t); } });
     old.forEach(t => { if(!seen[t.id]){ seen[t.id] = 1; out.push(t); } });
-    saveList(key, sortByTime(out).slice(0, 400));
+    // 端末の保存領域は限りがある。一覧は軽くして確実に入るようにする。
+    saveList(key, sortByTime(out).slice(0, 120).map(slimRow));
     store.set(key + ".at", String(Date.now()));
   }catch(e){}
 }
 
 // 保存しきれないときは、古いスレッドの本文から順に捨てて場所を空ける
+// 保存用に軽くする。表示に要らないものは落とす。
+function slimRow(t){
+  return { id:t.id, msgId:t.msgId, from:t.from, addr:t.addr, to:t.to,
+           toAll:t.toAll, ccAll:t.ccAll, subject:t.subject, date:t.date, ts:t.ts,
+           unread:t.unread, replied:t.replied, box:t.box, draftId:t.draftId,
+           body:String(t.body||"").slice(0,140) };
+}
+
 function saveList(key, list){
   for(let attempt = 0; attempt < 4; attempt++){
     try{ store.set(key, JSON.stringify(list)); return; }
@@ -1773,8 +1788,9 @@ function sortByTime(list){
 function boxView(list){
   if(currentBox === "TODO") return sortByTime(settings.todo || []);
   if(currentBox === "WAIT"){
-    // 裏側が「最新が自分の送信」のものだけを返す。ここでは片付け済みを外すだけ。
-    return sortByTime((list || []).filter(t => !(settings.waitDone || {})[t.id]));
+    // 裏側が「最新が自分の送信」のものだけを返す。古い形式の行は混ぜない。
+    return sortByTime((list || [])
+      .filter(t => t.box === "WAIT" && !(settings.waitDone || {})[t.id]));
   }
   // 箱をまたいで混ざらないよう、その箱のものだけを出す。
   // 箱の記録が無いものは古い形式なので出さない（次の取得で入れ替わる）。
