@@ -176,6 +176,9 @@ button.rd-meta:hover .rd-to{color:var(--accent)}
 .dk-go[disabled]{opacity:.45;cursor:default}
 .dk-hint{font-size:11px;color:var(--text-3);line-height:1.5;flex:1;min-width:0;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
+.row{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+.rm-item{display:block;width:100%;text-align:left;padding:14px 16px;border:0;background:none;color:inherit;font-size:16px;border-bottom:1px solid rgba(127,127,127,.15)}
+.rm-item.danger{color:#e5484d}
 .scrim{position:fixed;inset:0;background:rgba(0,0,0,.16);display:none;z-index:40}
 .scrim.on{display:block}
 .compose,.sheet{position:fixed;z-index:50;display:none;flex-direction:column;left:50%;top:50%;transform:translate(-50%,-50%);background:var(--pane-bg);border-radius:11px;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,.28),0 0 0 .5px rgba(0,0,0,.16)}
@@ -333,7 +336,6 @@ button.rd-meta:hover .rd-to{color:var(--accent)}
         <button class="chip" id="fWait">返事待ち</button>
         <button class="chip" id="fSent">送信済み</button>
         <button class="chip" id="fDrafts">下書き</button>
-        <button class="chip" id="fPick">選択</button>
       </div>
       <button class="tb-btn" id="btnSearch" title="検索" aria-label="検索">
         <svg class="icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
@@ -348,12 +350,6 @@ button.rd-meta:hover .rd-to{color:var(--accent)}
           <svg class="icon" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>
         </button>
       </div>
-    </div>
-    <div class="bulk" id="bulk" hidden>
-      <span id="bulkN">0件</span>
-      <button class="chip" id="bulkArch">アーカイブ</button>
-      <button class="chip" id="bulkDone">返信不要</button>
-      <button class="chip danger" id="bulkTrash">削除</button>
     </div>
     <div class="pull" id="pullHint" hidden>引いて更新</div>
     <div class="list-scroll" id="listScroll" role="listbox" aria-label="メッセージ一覧"></div>
@@ -456,6 +452,15 @@ button.rd-meta:hover .rd-to{color:var(--accent)}
   <div class="sh-scroll" id="pplScroll"></div>
 </div>
 
+<div class="sheet" id="rowMenu" role="dialog" aria-modal="true" aria-label="操作">
+  <div class="cp-top">
+    <div class="tb-btn" style="visibility:hidden"></div>
+    <div class="cp-title" id="rmTitle">操作</div>
+    <button class="tb-btn" id="rmClose" aria-label="閉じる"><svg class="icon" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+  </div>
+  <div class="sh-scroll" id="rmBody"></div>
+</div>
+
 <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-label="設定">
   <div class="cp-top">
     <div class="tb-btn" style="visibility:hidden"></div>
@@ -478,7 +483,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v46";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v47";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -596,7 +601,7 @@ function polish(body, counterpart){
 }
 
 /* ---------- 保存 ---------- */
-const KEY = "mailai.v1", SCHEMA = 16;
+const KEY = "mailai.v1", SCHEMA = 17;
 const store = (() => {
   let ok = false;
   try { localStorage.setItem("_t","1"); localStorage.removeItem("_t"); ok = true; } catch(e){}
@@ -651,6 +656,10 @@ function migrate(raw){
   if(v < 14){ if(!d.scan || typeof d.scan !== "object") d.scan = {}; }
   if(v < 15){ if(typeof d.fs !== "number") d.fs = 1; }
   if(v < 16){ if(!d.names || typeof d.names !== "object") d.names = {}; }
+  if(v < 17){
+    if(!d.rewrites || typeof d.rewrites !== "object") d.rewrites = {};
+    if(!d.rwNo || typeof d.rwNo !== "object") d.rwNo = {};
+  }
   d.schema = SCHEMA;
   if(!Array.isArray(d.intents) || !d.intents.length) d.intents = DEFAULT_INTENTS.slice();
   if(!LEVELS[d.level]) d.level = "mid";
@@ -661,7 +670,7 @@ let settings = migrate(store.get(KEY)) || {
   schema: SCHEMA, level:"mid", memo:"", endpoint:"", token:"", fast:false, apiKey:"",
   terms: DEFAULT_TERMS.slice(), intents: DEFAULT_INTENTS.slice(), done: {}, todo: [],
   samples: {}, edits: [], rev: 0, draft: null,
-  tone: {}, triage: {}, aiTriage: false, preflight: true, waitDone: {}, scan: {}, fs: 1, names: {}
+  tone: {}, triage: {}, aiTriage: false, preflight: true, waitDone: {}, scan: {}, fs: 1, names: {}, rewrites: {}, rwNo: {}
 };
 
 let saveTimer = null;
@@ -793,11 +802,76 @@ async function samplesFor(addr){
   return box[key];
 }
 
+// 案と実際に送った文の文字差分から「言い換え」を拾う
+function diffRewrites(a, b){
+  a = String(a || "").slice(0, 1500); b = String(b || "").slice(0, 1500);
+  const n = a.length, m = b.length;
+  if(!n || !m) return [];
+  // 共通部分の長さ表（1行ずつ使い回す）
+  let prev = new Uint16Array(m + 1), cur = new Uint16Array(m + 1);
+  const rows = [prev.slice()];
+  for(let i = 1; i <= n; i++){
+    for(let j = 1; j <= m; j++){
+      cur[j] = a[i-1] === b[j-1] ? prev[j-1] + 1 : Math.max(prev[j], cur[j-1]);
+    }
+    rows.push(cur.slice());
+    const t = prev; prev = cur; cur = t;
+  }
+  // 後ろからたどって「消した並び」と「足した並び」が隣り合う所を置き換えとみなす
+  const pairs = [];
+  let i = n, j = m, del = "", ins = "";
+  const flushPair = () => {
+    if(del && ins) pairs.push({ a: del, b: ins });
+    del = ""; ins = "";
+  };
+  while(i > 0 || j > 0){
+    if(i > 0 && j > 0 && a[i-1] === b[j-1]){ flushPair(); i--; j--; }
+    else if(j > 0 && (i === 0 || rows[i][j-1] >= rows[i-1][j])){ ins = b[j-1] + ins; j--; }
+    else { del = a[i-1] + del; i--; }
+  }
+  flushPair();
+  const bad = /^[\s、。！？!?・…〜ー()（）「」\d]+$/;
+  return pairs.filter(p =>
+    p.a !== p.b &&
+    p.a.length >= 1 && p.a.length <= 14 &&
+    p.b.length >= 1 && p.b.length <= 14 &&
+    p.a.indexOf("\n") === -1 && p.b.indexOf("\n") === -1 &&
+    !bad.test(p.a) && !bad.test(p.b));
+}
+
+// 同じ言い換えを2回したら、設定の「言い換え」一覧に自動で足す
+function learnRewrites(draft, sent){
+  let pairs = [];
+  try{ pairs = diffRewrites(draft, sent); }catch(e){ return; }
+  if(!pairs.length) return;
+  settings.rewrites = settings.rewrites || {};
+  settings.rwNo = settings.rwNo || {};
+  settings.terms = settings.terms || [];
+  pairs.forEach(p => {
+    const k = p.a + "→" + p.b;
+    if(settings.rwNo[k]) return;                                        // 消されたものは覚え直さない
+    if(settings.rwNo[p.b + "→" + p.a]) return;
+    settings.rewrites[k] = (settings.rewrites[k] || 0) + 1;
+    const dup = settings.terms.some(t => t.from === p.a && t.to === p.b);
+    const rev = settings.terms.some(t => t.from === p.b && t.to === p.a);
+    if(settings.rewrites[k] >= 2 && !dup && !rev){
+      settings.terms.push({ from: p.a, to: p.b, auto: true });
+    }
+  });
+  const ks = Object.keys(settings.rewrites);
+  if(ks.length > 80){
+    ks.sort((x, y) => settings.rewrites[x] - settings.rewrites[y])
+      .slice(0, ks.length - 80).forEach(k => delete settings.rewrites[k]);
+  }
+  flush();
+}
+
 // 生成案を高崎さんが直して送ったら、その差分を覚えておく
 function rememberEdit(addr, draft, sent){
   const a = String(draft || "").trim(), b = String(sent || "").trim();
   if(!a || !b || a === b) return;
-  if(Math.abs(a.length - b.length) < 4 && a.slice(0,40) === b.slice(0,40)) return;  // ほぼ同じなら覚えない
+  learnRewrites(a, b);   // 言い換えは、直しが小さくても学ぶ
+  if(Math.abs(a.length - b.length) < 4 && a.slice(0,40) === b.slice(0,40)) return;  // ほぼ同じなら例文としては覚えない
   const one = { addr: addr || "", draft: a.slice(0, 500), sent: b.slice(0, 500) };
   settings.edits = (settings.edits || []).concat([one]).slice(-20);
   flush();
@@ -1104,11 +1178,7 @@ function renderFilters(){
   $("fWait").setAttribute("aria-pressed", currentBox === "WAIT");
   $("fSent").setAttribute("aria-pressed", currentBox === "SENT");
   $("fDrafts").setAttribute("aria-pressed", currentBox === "DRAFTS2");
-  $("fPick").setAttribute("aria-pressed", picking);
   $("fTodo").textContent = n ? "要返信 " + n : "要返信";
-  const sel = Object.keys(picked).length;
-  $("bulk").hidden = !picking;
-  $("bulkN").textContent = sel + "件";
 }
 tapOnly($("fInbox"), () => switchBox("INBOX"));
 tapOnly($("fTodo"), () => switchBox("TODO"));
@@ -1123,48 +1193,113 @@ function switchBox(box){
   picking = false; picked = {};
   load();
 }
-tapOnly($("fPick"), () => { picking = !picking; picked = {}; renderFilters(); renderList(); });
 
-// まとめて処理する
-async function bulk(fn, label){
-  const ids = Object.keys(picked);
-  if(!ids.length) return;
-  const rows = threads.filter(t => picked[t.id]);
-  banner(label + "しています…");
-  let ng = 0;
-  for(const id of ids){
-    try { await fn(id); } catch(e){ ng++; }
-  }
-  threads = threads.filter(t => !picked[t.id]);
-  ids.forEach(dropFromCaches);
-  picked = {}; picking = false;
-  renderFilters(); renderList();
-  if(ng){
-    banner(label + "できなかったものが" + ng + "件あります。");
-    setTimeout(() => banner(""), 3500);
+// 行を長押ししたときの1件処理
+function doneRow(t){
+  if(currentBox === "WAIT"){
+    settings.waitDone = settings.waitDone || {};
+    settings.waitDone[doneKey(t)] = 1;
+    const wk = Object.keys(settings.waitDone);
+    if(wk.length > 300) wk.slice(0, wk.length - 300).forEach(k => delete settings.waitDone[k]);
   } else {
-    const box = currentBox;
-    offerUndo(ids.length + "件を" + label + "しました", async () => {
-      for(const t of rows){
-        if(label === "アーカイブ" || label === "削除"){
-          try{ await api("restore", { id: t.id }); }catch(e){}
-        } else if(box === "WAIT"){ delete (settings.waitDone || {})[doneKey(t)]; delete (settings.waitDone || {})[t.id]; }
-        else delete settings.done[doneKey(t)];
-        putBack(t, box);
-      }
-      flush(); pushState();
-    });
+    settings.done[doneKey(t)] = 1;
+    pruneDone();
   }
+  dropTodo(t.id); flush(); pushState();
+  const box = currentBox;
+  threads = threads.filter(x => x.id !== t.id);
+  renderList(); renderFilters();
+  offerUndo("片付けました", async () => {
+    if(box === "WAIT"){ delete (settings.waitDone || {})[doneKey(t)]; delete (settings.waitDone || {})[t.id]; }
+    else delete settings.done[doneKey(t)];
+    flush(); pushState();
+    if(box === "TODO") mergeTodo([t]);
+    putBack(t, box);
+  });
 }
-$("bulkArch").onclick  = () => bulk(async id => { await api("archive", { id }); dropTodo(id); }, "アーカイブ");
-$("bulkTrash").onclick = () => bulk(async id => { await api("trash", { id }); dropTodo(id); }, "削除");
-$("bulkDone").onclick  = () => bulk(async id => {
+
+function rowMenu(id){
   const t = threads.find(x => x.id === id);
   if(!t) return;
-  if(currentBox === "WAIT"){ settings.waitDone = settings.waitDone || {}; settings.waitDone[doneKey(t)] = 1; }
-  else settings.done[doneKey(t)] = 1;
-  dropTodo(id);
-}, "片付け");
+  const isDraft = currentBox === "DRAFTS2";
+  const items = [];
+  items.push({ k:"open", label: isDraft ? "開く" : "読む" });
+  if(!isDraft){
+    if(t.unread) items.push({ k:"read", label:"既読にする" });
+    else items.push({ k:"unread", label:"未読にする" });
+    if(currentBox === "TODO" || currentBox === "WAIT") items.push({ k:"done", label:"片付ける" });
+    items.push({ k:"arch", label:"アーカイブ" });
+  }
+  items.push({ k:"trash", label: isDraft ? "下書きを削除" : "削除", danger:true });
+  $("rmTitle").textContent = (t.subject || "(件名なし)").slice(0, 40);
+  $("rmBody").innerHTML = items.map(x =>
+    `<button class="rm-item ${x.danger?"danger":""}" data-rm="${x.k}">${x.label}</button>`).join("");
+  $("rowMenu").classList.add("on"); $("scrim").classList.add("on");
+  $("rmBody").querySelectorAll("[data-rm]").forEach(b => b.onclick = async () => {
+    closeRowMenu();
+    const k = b.dataset.rm;
+    if(k === "open"){
+      if(isDraft) openCompose({ to:t.to, cc:t.cc, subject:t.subject, body:t.body,
+        draftId:t.draftId, title:"下書き" });
+      else open(t.id);
+      return;
+    }
+    if(k === "done"){ doneRow(t); return; }
+    if(k === "read" || k === "unread"){
+      try{
+        await api(k === "read" ? "read" : "unread", { id: t.id });
+        t.unread = (k === "unread");
+        renderList(); renderSidebar();
+      }catch(e){ banner("変えられませんでした。" + e.message); }
+      return;
+    }
+    if(k === "arch"){
+      const box = currentBox;
+      threads = threads.filter(x => x.id !== t.id);
+      dropTodo(t.id); dropFromCaches(t.id);
+      renderList(); renderFilters(); renderSidebar();
+      offerUndo("アーカイブしました", async () => {
+        await api("restore", { id: t.id }); putBack(t, box);
+      });
+      try{ await api("archive", { id: t.id }); }
+      catch(e){ banner("アーカイブできませんでした。" + e.message); }
+      return;
+    }
+    if(k === "trash"){
+      const box = currentBox;
+      threads = threads.filter(x => x.id !== t.id);
+      dropTodo(t.id); dropFromCaches(t.id);
+      renderList(); renderFilters(); renderSidebar();
+      if(isDraft){
+        try{ await api("draftDrop", { draftId: t.draftId }); banner("下書きを削除しました"); setTimeout(() => banner(""), 2500); }
+        catch(e){ banner("削除できませんでした。" + e.message); }
+        return;
+      }
+      offerUndo("削除しました", async () => {
+        await api("restore", { id: t.id }); putBack(t, box);
+      });
+      try{ await api("trash", { id: t.id }); }
+      catch(e){ banner("削除できませんでした。" + e.message); }
+      return;
+    }
+  });
+}
+const closeRowMenu = () => { $("rowMenu").classList.remove("on"); if(!document.querySelector(".sheet.on")) $("scrim").classList.remove("on"); };
+$("rmClose").onclick = closeRowMenu;
+
+function attachLongPress(r){
+  let timer = null, sx = 0, sy = 0;
+  r.addEventListener("pointerdown", e => {
+    sx = e.clientX; sy = e.clientY; r.dataset.lp = "";
+    timer = setTimeout(() => { r.dataset.lp = "1"; rowMenu(r.dataset.id); }, 500);
+  });
+  r.addEventListener("pointermove", e => {
+    if(Math.abs(e.clientX - sx) > 10 || Math.abs(e.clientY - sy) > 10) clearTimeout(timer);
+  });
+  ["pointerup","pointercancel","pointerleave"].forEach(ev =>
+    r.addEventListener(ev, () => clearTimeout(timer)));
+  r.addEventListener("contextmenu", e => { e.preventDefault(); rowMenu(r.dataset.id); });
+}
 
 function renderSidebar(){
   $("sbScroll").innerHTML = `<div class="sb-head">${esc(ACCOUNT)}</div>` + MAILBOXES.map(b => {
@@ -1202,10 +1337,8 @@ function renderList(){
         <span class="subj">${esc(m.subject)}</span>
         <span class="prev">${esc(String(m.body||"").replace(/\n+/g," "))}</span>
       </span>
-      ${picking ? `<button class="pick" data-pick="${esc(m.id)}" aria-pressed="${!!picked[m.id]}" aria-label="選ぶ">
-        <svg class="icon" viewBox="0 0 24 24"><path d="m5 12 5 5 9-10"/></svg></button>`
-        : ((currentBox === "TODO" || currentBox === "WAIT") ? `<button class="row-done" data-done="${esc(m.id)}" aria-label="片付ける">
-        <svg class="icon" viewBox="0 0 24 24"><path d="m5 12 5 5 9-10"/></svg></button>` : "")}
+      ${(currentBox === "TODO" || currentBox === "WAIT") ? `<button class="row-done" data-done="${esc(m.id)}" aria-label="片付ける">
+        <svg class="icon" viewBox="0 0 24 24"><path d="m5 12 5 5 9-10"/></svg></button>` : ""}
     </div>`).join("");
   if(threads.length || currentBox === "TODO" || currentBox === "WAIT"){
     const scanning = (currentBox === "TODO" || currentBox === "WAIT");
@@ -1214,19 +1347,9 @@ function renderList(){
       (scanning && doneNote() ? `<div class="status">${esc(doneNote())}</div>` : ""));
     $("btnMore").onclick = () => loadMore();
   }
-  el.querySelectorAll("[data-pick]").forEach(b => b.onclick = (e) => {
-    e.stopPropagation();
-    const id = b.dataset.pick;
-    if(picked[id]) delete picked[id]; else picked[id] = 1;
-    b.setAttribute("aria-pressed", !!picked[id]);
-    renderFilters();
-  });
+  el.querySelectorAll("[data-id]").forEach(r => attachLongPress(r));
   el.querySelectorAll("[data-id]").forEach(r => r.onclick = () => {
-    if(picking){
-      const id = r.dataset.id;
-      if(picked[id]) delete picked[id]; else picked[id] = 1;
-      renderList(); renderFilters(); return;
-    }
+    if(r.dataset.lp === "1"){ r.dataset.lp = ""; return; }   // 長押し直後のタップは無視
     if(currentBox === "DRAFTS2"){
       const d = threads.find(t => t.id === r.dataset.id);
       if(d) openCompose({ to:d.to, cc:d.cc, subject:d.subject, body:d.body,
@@ -1239,26 +1362,7 @@ function renderList(){
     e.stopPropagation();
     const t = threads.find(x => x.id === b.dataset.done);
     if(!t) return;
-    if(currentBox === "WAIT"){
-      settings.waitDone = settings.waitDone || {};
-      settings.waitDone[doneKey(t)] = 1;
-      const wk = Object.keys(settings.waitDone);
-      if(wk.length > 300) wk.slice(0, wk.length - 300).forEach(k => delete settings.waitDone[k]);
-    } else {
-      settings.done[doneKey(t)] = 1;
-      pruneDone();
-    }
-    dropTodo(t.id); flush(); pushState();
-    const box = currentBox;
-    threads = threads.filter(x => x.id !== t.id);
-    renderList(); renderFilters();
-    offerUndo("片付けました", async () => {
-      if(box === "WAIT"){ delete (settings.waitDone || {})[doneKey(t)]; delete (settings.waitDone || {})[t.id]; }
-      else delete settings.done[doneKey(t)];
-      flush(); pushState();
-      if(box === "TODO") mergeTodo([t]);
-      putBack(t, box);
-    });
+    doneRow(t);
   });
 }
 
@@ -2111,7 +2215,13 @@ function openCompose(o = {}){
     try{ el.setSelectionRange(o.caret, o.caret); }catch(e){}
     el.scrollTop = 0;
   } else {
-    ($(o.body ? "cpBody" : "cpTo")).focus();
+    const box = $(o.body ? "cpBody" : "cpTo");
+    box.focus();
+    if(o.body){
+      // 本文があるときは先頭から。下書きを開いて一番下に飛ばされない。
+      try{ box.setSelectionRange(0, 0); }catch(e){}
+      box.scrollTop = 0;
+    }
   }
 }
 const closeCompose = () => {
@@ -2175,7 +2285,7 @@ function closeBanner(){
 }
 
 $("cpClose").onclick = closeCompose;
-$("scrim").onclick = () => { closeCompose(); closeSheet(); closePeople(); closeCal(); };
+$("scrim").onclick = () => { closeCompose(); closeSheet(); closePeople(); closeCal(); closeRowMenu(); };
 $("btnBack").onclick = () => { document.body.classList.remove("reading"); updateDock(); };
 $("btnRefresh").onclick = () => load({ force:true });
 // 過去に自分が書いた宛名から、その相手の呼び名を覚える
@@ -2719,7 +2829,7 @@ ${settings.apiKey ? `保存されている値: ${settings.apiKey.length}文字 /
 
     <div class="sh-sec">言い換え</div>
     ${(settings.terms||[]).map((t,i) => `
-      <div class="sh-row"><div class="k"><div class="n">${esc(t.from)} → ${esc(t.to)}</div></div>
+      <div class="sh-row"><div class="k"><div class="n">${esc(t.from)} → ${esc(t.to)}${t.auto ? '<span style="opacity:.55;font-size:12px">（送った文から自動で覚えました）</span>' : ""}</div></div>
       <button class="sh-btn danger ${armedTerm===i?"armed":""}" data-delterm="${i}">${armedTerm===i?"もう一度で削除":"削除"}</button></div>`).join("")}
     <div class="sh-row"><div class="k"><input class="sh-in" id="newFrom" placeholder="普段の言い方（例: お茶の間）"></div>
       <div class="k"><input class="sh-in" id="newTo" placeholder="正式名称（例: OCHA NORMA）"></div>
@@ -2790,6 +2900,12 @@ ${settings.apiKey ? `保存されている値: ${settings.apiKey.length}文字 /
   $("shScroll").querySelectorAll("[data-delterm]").forEach(b => b.onclick = () => {
     const i = +b.dataset.delterm;
     if(armedTerm !== i){ armedTerm = i; renderSheet(); return; }
+    const t = settings.terms[i];
+    if(t && t.auto){
+      settings.rwNo = settings.rwNo || {};
+      settings.rwNo[t.from + "→" + t.to] = 1;          // 消したものは自動で覚え直さない
+      delete (settings.rewrites || {})[t.from + "→" + t.to];
+    }
     settings.terms.splice(i, 1);
     armedTerm = null; rerender();
   });
