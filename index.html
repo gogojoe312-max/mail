@@ -466,7 +466,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v48";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v49";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -1724,7 +1724,7 @@ async function load(opts){
   if(!force && !query && threads.length && age < freshFor){
     loading = false;
     renderList();
-    if(currentBox === "INBOX") setTimeout(() => prefetchTop(threads), 1500);
+    if(currentBox === "INBOX") setTimeout(() => { prefetchTop(threads); warmWait(); }, 1500);
     return;
   }
 
@@ -1751,7 +1751,7 @@ async function load(opts){
           aiTriage(raw).then(() => {
             mergeTodo(raw); renderFilters();
             if(currentBox === "TODO"){ threads = boxView([]); renderList(); }
-          }).then(() => prefetchTop(raw));
+          }).then(() => prefetchTop(raw)).then(() => warmWait());
         }, 1200);
       }
     }
@@ -1787,6 +1787,23 @@ async function load(opts){
     renderSidebar(); renderList();
     if(!currentId) renderReader();
   }
+}
+
+// 受信を取り終えたら、返事待ちを裏で取っておく。切り替えた瞬間に待たせないため。
+let warmBusy = false;
+async function warmWait(){
+  if(warmBusy || !connected()) return;
+  if(currentBox === "WAIT") return;                      // いま見ているなら load が持つ
+  const key = "cache.WAIT";
+  const age = Date.now() - Number(store.get(key + ".at") || 0);
+  if(age < 300000) return;                               // 5分は温め直さない
+  warmBusy = true;
+  try{
+    const r = await api("threads", { box: "WAIT", full: true, limit: 30 });
+    const raw = r.threads || [];
+    if(raw.length) writeCache(key, raw);                 // .at は writeCache が記す
+  }catch(e){}                                            // 温めそこねても画面には出さない
+  finally{ warmBusy = false; }
 }
 
 // 片付けたものは、保存してある一覧からも消す。次に切り替えたとき戻ってこないように。
