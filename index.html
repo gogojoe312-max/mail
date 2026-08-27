@@ -93,8 +93,6 @@ input,textarea{font-family:inherit;font-size:inherit;color:inherit}
 .filters .chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
 .pull{flex:0 0 auto;display:flex;align-items:center;justify-content:center;height:30px;
   font-size:12px;color:var(--text-3);background:var(--pane-bg)}
-.bulk{flex:0 0 auto;display:flex;align-items:center;gap:7px;padding:8px 12px;border-bottom:1px solid var(--hairline);
-  background:var(--fill);font-size:12px;color:var(--text-2)}
 .chip.danger{color:#d70015;border-color:rgba(215,0,21,.35)}
 
 .row-done:hover::before{border-color:var(--accent)}
@@ -102,7 +100,7 @@ input,textarea{font-family:inherit;font-size:inherit;color:inherit}
 .row{display:grid;grid-template-columns:14px minmax(0,1fr) auto;width:100%;max-width:100%;min-height:var(--row-h);
   padding:9px 0 10px 6px;border-bottom:1px solid var(--hairline-soft);text-align:left;align-items:start;overflow:hidden}
 .row > span:nth-child(2){padding-right:14px}
-.row .row-done,.row .pick{align-self:stretch}
+.row .row-done{align-self:stretch}
 .row span{min-width:0;max-width:100%}
 .row .dot{width:8px;height:8px;border-radius:50%;background:var(--accent);margin:5px 0 0 3px;visibility:hidden}
 .row.unread .dot{visibility:visible}
@@ -246,21 +244,17 @@ button.rd-meta:hover .rd-to{color:var(--accent)}
 .tb-btn .icon{width:22px;height:22px}
 .chip{height:36px;padding:0 14px;font-size:13px}
 .dk-go{height:44px;padding:0 18px;font-size:14px}
-.draft-act button{height:38px;padding:0 16px;font-size:13.5px}
 .sh-btn{height:36px;padding:0 14px;font-size:13px}
 .row{min-height:76px;padding-top:12px;padding-bottom:13px}
-.row:not(:has(.row-done)):not(:has(.pick)) > span:nth-child(2){padding-right:14px}
-.row-done,.pick{position:relative;width:58px;min-height:58px;margin:0;padding:0;
+.row:not(:has(.row-done)) > span:nth-child(2){padding-right:14px}
+.row-done{position:relative;width:58px;min-height:58px;margin:0;padding:0;
   align-self:stretch;border:0;border-radius:0;background:none;
   display:flex;align-items:center;justify-content:center;touch-action:manipulation}
-.row-done::before,.pick::before{content:"";position:absolute;width:30px;height:30px;
+.row-done::before{content:"";position:absolute;width:30px;height:30px;
   border-radius:50%;border:1.5px solid var(--hairline)}
-.row-done:active::before,.pick:active::before{background:var(--hairline-soft)}
-.pick[aria-pressed="true"]::before{background:var(--accent);border-color:var(--accent)}
-.row-done .icon,.pick .icon{position:relative;width:16px;height:16px}
+.row-done:active::before{background:var(--hairline-soft)}
+.row-done .icon{position:relative;width:16px;height:16px}
 .row-done{color:var(--text-3)}
-.pick{color:transparent}
-.pick[aria-pressed="true"]{color:#fff}
 .more{height:44px;font-size:14px}
 .att button{height:38px;padding:0 14px;font-size:13px}
 .quote-toggle{height:32px;padding:0 14px}
@@ -275,17 +269,6 @@ button.rd-meta:hover .rd-to{color:var(--accent)}
 /* ---- 更新中の表示 ---- */
 .rdbusy{display:flex;align-items:center;gap:6px;margin-left:6px;font-size:12px;color:var(--text-3);white-space:nowrap}
 .rdbusy .spin{width:13px;height:13px}
-.busy{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text-3);margin-left:auto}
-.busy .spin{width:13px;height:13px}
-
-/* ---- 返信中に元のメールを見る ---- */
-.cp-quote{border-top:1px solid var(--hairline);background:var(--fill)}
-.cp-quote summary{padding:11px 16px;font-size:12.5px;color:var(--text-2);cursor:pointer;list-style:none}
-.cp-quote summary::-webkit-details-marker{display:none}
-.cp-quote summary::before{content:"▸ ";color:var(--text-3)}
-.cp-quote[open] summary::before{content:"▾ "}
-.cp-quote .q{max-height:38vh;overflow:auto;padding:0 16px 14px;font-size:12.5px;line-height:1.55;
-  white-space:pre-wrap;color:var(--text-2);overflow-wrap:anywhere}
 
 /* ---- 文字の大きさ。設定の「文字の大きさ」で --fs が変わる ---- */
 .row .from{font-size:calc(15px * var(--fs));font-weight:600}
@@ -483,7 +466,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v47";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v48";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -957,7 +940,6 @@ let lastIntent = null, lastGenerated = "";
 let currentDrafts = null, draftsBusy = false, draftsError = "", streamText = "";
 let openMsgs = {};   // メールごとの開閉。既定は最新だけ開く。
 let inboxAll = [];   // 受信箱の生データ。要返信の絞り込みに使う。
-let picking = false, picked = {};   // 複数選択
 let composeMode = "mail";           // "mail" か "forward"
 let forwardMsgId = "";
 
@@ -1190,7 +1172,6 @@ tapOnly($("fDrafts"), () => switchBox("DRAFTS2"));
 function switchBox(box){
   if(currentBox === box) return;
   currentBox = box;
-  picking = false; picked = {};
   load();
 }
 
@@ -3054,7 +3035,7 @@ window.__dbg = {
     flush();
   },
   async go(box, force){
-    if(box && box !== currentBox){ currentBox = box; picking = false; picked = {}; }
+    if(box && box !== currentBox){ currentBox = box; }
     await load(force ? { force:true } : undefined);
     return threads.length;
   }
