@@ -478,7 +478,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v44";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v45";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -668,7 +668,7 @@ let saveTimer = null;
 const save  = () => { clearTimeout(saveTimer); saveTimer = setTimeout(flush, 400); };
 // 保存の形を変えたときは、古い保存を捨ててやり直す。
 // 混ざったまま使うと、表示が欠けたり順序が壊れたりする。
-const CACHE_VER = "5";
+const CACHE_VER = "6";
 const RULE_VER = "3";   // 要返信の判定を変えたら上げる
 function resetCachesIfNeeded(){
   let cur = null;
@@ -1148,7 +1148,7 @@ async function bulk(fn, label){
       for(const t of rows){
         if(label === "アーカイブ" || label === "削除"){
           try{ await api("restore", { id: t.id }); }catch(e){}
-        } else if(box === "WAIT") delete (settings.waitDone || {})[t.id];
+        } else if(box === "WAIT"){ delete (settings.waitDone || {})[doneKey(t)]; delete (settings.waitDone || {})[t.id]; }
         else delete settings.done[doneKey(t)];
         putBack(t, box);
       }
@@ -1161,7 +1161,7 @@ $("bulkTrash").onclick = () => bulk(async id => { await api("trash", { id }); dr
 $("bulkDone").onclick  = () => bulk(async id => {
   const t = threads.find(x => x.id === id);
   if(!t) return;
-  if(currentBox === "WAIT"){ settings.waitDone = settings.waitDone || {}; settings.waitDone[id] = 1; }
+  if(currentBox === "WAIT"){ settings.waitDone = settings.waitDone || {}; settings.waitDone[doneKey(t)] = 1; }
   else settings.done[doneKey(t)] = 1;
   dropTodo(id);
 }, "片付け");
@@ -1241,7 +1241,7 @@ function renderList(){
     if(!t) return;
     if(currentBox === "WAIT"){
       settings.waitDone = settings.waitDone || {};
-      settings.waitDone[t.id] = 1;
+      settings.waitDone[doneKey(t)] = 1;
       const wk = Object.keys(settings.waitDone);
       if(wk.length > 300) wk.slice(0, wk.length - 300).forEach(k => delete settings.waitDone[k]);
     } else {
@@ -1253,7 +1253,7 @@ function renderList(){
     threads = threads.filter(x => x.id !== t.id);
     renderList(); renderFilters();
     offerUndo("片付けました", async () => {
-      if(box === "WAIT") delete (settings.waitDone || {})[t.id];
+      if(box === "WAIT"){ delete (settings.waitDone || {})[doneKey(t)]; delete (settings.waitDone || {})[t.id]; }
       else delete settings.done[doneKey(t)];
       flush(); pushState();
       if(box === "TODO") mergeTodo([t]);
@@ -1817,9 +1817,13 @@ function sortByTime(list){
 function boxView(list){
   if(currentBox === "TODO") return sortByTime(settings.todo || []);
   if(currentBox === "WAIT"){
-    // 裏側が「最新が自分の送信」のものだけを返す。古い形式の行は混ぜない。
-    return sortByTime((list || [])
-      .filter(t => t.box === "WAIT" && !(settings.waitDone || {})[t.id]));
+    // 裏側が「最新が自分の送信」のものだけを返す。
+    // replied が false の行は「相手が既に返している」ので、古い保存から混ざっても出さない。
+    const wd = settings.waitDone || {};
+    return sortByTime((list || []).filter(t =>
+      t.box === "WAIT" &&
+      t.replied !== false &&
+      !wd[doneKey(t)] && !wd[t.id]));
   }
   // 箱をまたいで混ざらないよう、その箱のものだけを出す。
   // 箱の記録が無いものは古い形式なので出さない（次の取得で入れ替わる）。
