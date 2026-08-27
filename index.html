@@ -466,7 +466,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v49";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v50";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -2977,7 +2977,14 @@ function autoRefresh(){
     if(!document.hidden && connected() && currentBox === "INBOX") load();
   }, 120000);
 }
-document.addEventListener("visibilitychange", () => { if(!document.hidden && connected() && currentBox === "INBOX") load(); });
+let lastWake = 0;
+document.addEventListener("visibilitychange", () => {
+  if(document.hidden || !connected() || currentBox !== "INBOX") return;
+  const now = Date.now();
+  const force = now - lastWake > 15000;   // 開き直した瞬間は待たずに取りに行く（連打だけ抑える）
+  lastWake = now;
+  load(force ? { force: true } : undefined);
+});
 addEventListener("pageshow", () => { if(connected()) load(); });
 autoRefresh();
 
