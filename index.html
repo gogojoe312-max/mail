@@ -478,7 +478,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v43";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v44";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -669,7 +669,7 @@ const save  = () => { clearTimeout(saveTimer); saveTimer = setTimeout(flush, 400
 // 保存の形を変えたときは、古い保存を捨ててやり直す。
 // 混ざったまま使うと、表示が欠けたり順序が壊れたりする。
 const CACHE_VER = "5";
-const RULE_VER = "2";   // 要返信の判定を変えたら上げる
+const RULE_VER = "3";   // 要返信の判定を変えたら上げる
 function resetCachesIfNeeded(){
   let cur = null;
   try { cur = localStorage.getItem("mail.cachever"); } catch(e){ return; }
@@ -905,9 +905,10 @@ function needsReply(t){
   if(t.replied) return false;              // 自分が返したものは出さない
   if(MINE.test(t.addr || "")) return false;
   if(settings.done[doneKey(t)]) return false;
-  if(addressedToMe(t)) return true;
-  // AI判定は「拾い足す」だけに使う。既に入っているものを後から消さない。
-  return (settings.triage || {})[t.msgId] === 1;
+  if(!addressedToMe(t)) return false;      // 高崎宛てと名指しされていないものは、どの判定でも入れない
+  // AI判定は「名指しの中から、返事の要らないものを外す」ためだけに使う。拾い足しはしない。
+  if(settings.aiTriage && (settings.triage || {})[t.msgId] === 0) return false;
+  return true;
 }
 // 要返信は端末に貯める。取得できた範囲の外に出ても消えないようにする。
 // 相手ごとの文体を覚える。開いた瞬間にその相手の温度に切り替わる。
@@ -935,10 +936,10 @@ function slimThread(t){
 async function aiTriage(list){
   if(!settings.aiTriage || !settings.apiKey) return;
   const box = settings.triage || (settings.triage = {});
-  const pending = list.filter(t => box[t.msgId] === undefined).slice(0, 20);
+  const pending = list.filter(t => addressedToMe(t) && box[t.msgId] === undefined).slice(0, 20);
   if(!pending.length) return;
   const sys = [
-    "受け取ったメールが「高崎晟本人の返事を必要としているか」を判定する。",
+    "高崎晟宛てに名指しで届いたメールが「高崎晟本人の返事を必要としているか」を判定する。",
     "返事が要る: 質問されている、依頼されている、可否や日程の回答を求められている、確認を頼まれている。",
     "返事が不要: 報告や共有だけ、一斉配信、自動送信、案内、Ccで回ってきただけのもの、すでに話が完結しているもの。",
     "宛先の人数は判断材料にしてよいが、名指しで問われていれば人数が多くても返事が要る。",
@@ -2696,7 +2697,7 @@ ${settings.apiKey ? `保存されている値: ${settings.apiKey.length}文字 /
 
     <div class="sh-sec">AI の働き</div>
     <div class="sh-row"><div class="k"><div class="n">${settings.aiTriage ? "要返信をAIが判定" : "要返信を規則で判定"}</div>
-      <div class="d">本文を読んで「返事が要るか」を判断します。切ると、宛先と書き出しだけで判定します。</div></div>
+      <div class="d">高崎宛てのメールの中から、返事の要らないもの（報告・共有だけ等）を外します。宛先と書き出しの名指し判定は常に効きます。</div></div>
       <button class="sh-btn" id="btnTriage">${settings.aiTriage ? "規則にする" : "AIにする"}</button></div>
     <div class="sh-row"><div class="k"><div class="n">${settings.preflight ? "送る前に点検する" : "点検しない"}</div>
       <div class="d">答え漏れ・日付の食い違い・添付の言い忘れ・表記ゆれを送信前に見ます。
@@ -2939,7 +2940,7 @@ window.__dbg = {
 
 resetCachesIfNeeded();
 if(localStorage.getItem("mail.todover") !== CACHE_VER + "." + RULE_VER){
-  settings.todo = []; settings.scan = {}; flush();
+  settings.todo = []; settings.scan = {}; settings.triage = {}; flush();
   try { localStorage.setItem("mail.todover", CACHE_VER + "." + RULE_VER); } catch(e){}
 }
 applyFs();
