@@ -478,7 +478,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v45";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v46";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -1633,8 +1633,10 @@ async function load(opts){
   renderSidebar(); renderList(); renderFilters();
 
   // 2. 取ったばかりなら取りに行かない。切り替えただけで待たされないようにする。
+  // 受信だけは60秒で取り直す。新着が10分待ちにならないように。
   const age = Date.now() - Number(store.get(key + ".at") || 0);
-  if(!force && !query && threads.length && age < 600000){
+  const freshFor = currentBox === "INBOX" ? 60000 : 600000;
+  if(!force && !query && threads.length && age < freshFor){
     loading = false;
     renderList();
     if(currentBox === "INBOX") setTimeout(() => prefetchTop(threads), 1500);
