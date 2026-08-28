@@ -467,7 +467,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v51";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v52";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -1598,7 +1598,7 @@ function addrList(raw){
 }
 
 // 全員に返信のCc。自分のアドレスと差出人は外す。
-const MINE = /j-takasaki@(ufg\.co\.jp|bu\.k-cloud90\.biz)|recording@ufg\.co\.jp/i;   // recording@ も高崎の送信元
+const MINE = /j-takasaki@(ufg\.co\.jp|bu\.k-cloud90\.biz)/i;
 // 返信先を決める。返信対象が自分の送信だったら、その宛先側の相手を主にする。
 // （自分をToにして送ってしまう事故を防ぐ）
 function replyToFor(m, all){
