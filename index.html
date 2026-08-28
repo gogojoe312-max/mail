@@ -87,7 +87,8 @@ input,textarea{font-family:inherit;font-size:inherit;color:inherit}
 .chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
 .search-over{position:absolute;left:8px;right:8px;top:50%;transform:translateY(-50%);
   display:flex;align-items:center;gap:8px;height:40px;padding:0 12px;border-radius:20px;
-  background:var(--fill);z-index:5}
+  background:var(--bg);box-shadow:0 0 0 100vmax var(--bg);clip-path:inset(-12px 0);z-index:5}
+.search-over[hidden]{display:none}
 .search-over input{flex:1;min-width:0;border:0;background:none;color:var(--text);outline:none}
 .pane-top{position:relative}
 .filters .chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
@@ -466,7 +467,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v50";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v51";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -1597,7 +1598,28 @@ function addrList(raw){
 }
 
 // 全員に返信のCc。自分のアドレスと差出人は外す。
-const MINE = /j-takasaki@(ufg\.co\.jp|bu\.k-cloud90\.biz)/i;
+const MINE = /j-takasaki@(ufg\.co\.jp|bu\.k-cloud90\.biz)|recording@ufg\.co\.jp/i;   // recording@ も高崎の送信元
+// 返信先を決める。返信対象が自分の送信だったら、その宛先側の相手を主にする。
+// （自分をToにして送ってしまう事故を防ぐ）
+function replyToFor(m, all){
+  let to = m.addr || "";
+  let cc = all ? replyAllCc(m) : "";
+  if(!to || MINE.test(to)){
+    const others = addrList(m.to || "").map(x => x.addr).filter(a => a && !MINE.test(a));
+    to = others[0] || "";
+    if(all){
+      const seen = { [String(to).toLowerCase()]: 1 };
+      const rest = [];
+      others.slice(1).concat(cc ? cc.split(/,\s*/) : []).forEach(a => {
+        const k = String(a).toLowerCase();
+        if(a && !seen[k] && !MINE.test(a)){ seen[k] = 1; rest.push(a); }
+      });
+      cc = rest.join(", ");
+    }
+  }
+  return { to, cc };
+}
+
 function replyAllCc(m){
   const seen = {}, out = [];
   [m.to, m.cc].forEach(f => String(f||"").split(",").forEach(one => {
@@ -1641,10 +1663,10 @@ function renderDrafts(){
   const openDraft = (idx, all) => {
     const m = replyTarget() || lastMsg(), d = currentDrafts[idx];
     if(!m || !d) return;
-    const mine = MINE.test(m.addr || "");
+    const dst = replyToFor(m, all);
     openCompose({
       quote: m,
-      to: mine ? (m.to || "") : (m.addr || ""), cc: all && !mine ? replyAllCc(m) : "",
+      to: dst.to, cc: dst.cc,
       subject:/^Re:/i.test(m.subject||"")?m.subject:"Re: "+(m.subject||""),
       body:d.text, title: all ? "全員に返信" : "返信",
       threadId: current && current.id, all,
@@ -1763,7 +1785,8 @@ async function load(opts){
       // 取れたものは必ず全部出す。保存にあるものは、そこに無いぶんだけ足す。
       // 件数で比べて片方を捨てると、保存の書き込みが失敗したときに
       // 取れたばかりの新しい行が消える。
-      const fresh = boxView(raw);
+      // 検索のときは箱の絞り込みを通さない（どの箱で検索しても全結果を出す）。
+      const fresh = query ? sortByTime(raw) : boxView(raw);
       threads = fresh;
       if(!query){
         writeCache(key, raw);
@@ -2352,8 +2375,9 @@ function openReply(all){
   const m = replyTarget(); if(!m) return;
   learnName(m.addr).then(() => {});   // 次に開くときのために裏で覚える
   const sk = replySkeleton(m);
+  const dst = replyToFor(m, all);
   openCompose({
-    quote: m, to:m.addr, cc: all ? replyAllCc(m) : "",
+    quote: m, to: dst.to, cc: dst.cc,
     subject:/^Re:/i.test(m.subject||"")?m.subject:"Re: "+(m.subject||""),
     title: all ? "全員に返信" : "返信", threadId:current.id, all,
     body: sk.body, caret: sk.caret });
