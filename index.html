@@ -467,7 +467,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v53";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v54";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -592,7 +592,7 @@ const store = (() => {
   const mem = {};
   return { persistent: ok,
     get(k){ try { if(ok) return localStorage.getItem(k); return (k in mem) ? mem[k] : null; } catch(e){ return (k in mem) ? mem[k] : null; } },
-    set(k,v){ try { ok ? localStorage.setItem(k,v) : (mem[k]=v); } catch(e){ mem[k]=v; } } };
+    set(k,v){ try { ok ? localStorage.setItem(k,v) : (mem[k]=v); } catch(e){ mem[k]=v; store.failed = true; } } };
 })();
 
 const DEFAULT_TERMS = [
@@ -856,8 +856,8 @@ function rememberEdit(addr, draft, sent){
   if(!a || !b || a === b) return;
   learnRewrites(a, b);   // 言い換えは、直しが小さくても学ぶ
   if(Math.abs(a.length - b.length) < 4 && a.slice(0,40) === b.slice(0,40)) return;  // ほぼ同じなら例文としては覚えない
-  const one = { addr: addr || "", draft: a.slice(0, 500), sent: b.slice(0, 500) };
-  settings.edits = (settings.edits || []).concat([one]).slice(-20);
+  const one = { addr: addr || "", draft: a.slice(0, 400), sent: b.slice(0, 400) };
+  settings.edits = (settings.edits || []).concat([one]).slice(-10);
   flush();
 }
 
@@ -1756,10 +1756,15 @@ async function load(opts){
       threads = fresh;
       if(!query){
         writeCache(key, raw);
-        const stored = boxView(readCache(key));
-        const seen = {};
-        fresh.forEach(t => seen[t.id] = 1);
-        threads = sortByTime(fresh.concat(stored.filter(t => !seen[t.id])));
+        if(currentBox !== "WAIT"){
+          // 返事待ち以外は、取得の枠から外れた手元の行も足す。
+          // 返事待ちは足さない — 「相手が返してきたので枠から消えた」スレッドを
+          // 残してしまい、返信済みが載り続ける原因だった。
+          const stored = boxView(readCache(key));
+          const seen = {};
+          fresh.forEach(t => seen[t.id] = 1);
+          threads = sortByTime(fresh.concat(stored.filter(t => !seen[t.id])));
+        }
       }
     } else if(!query){
       threads = boxView(readCache(key));   // 空の取得では手元のものを出す
@@ -1864,7 +1869,8 @@ function writeCache(key, fresh){
     // その箱のものだけを残す。古い形式や別の箱の行を持ち込まない。
     fresh = fresh.filter(t => t.box === want);
     if(!fresh.length) return;
-    const old = readCache(key).filter(t => t.box === want);
+    // 返事待ちは丸ごと入れ替え。古い行を混ぜると返信済みが残る。
+    const old = (want === "WAIT") ? [] : readCache(key).filter(t => t.box === want);
     const seen = {}, out = [];
     (fresh || []).forEach(t => { if(!seen[t.id]){ seen[t.id] = 1; out.push(t); } });
     old.forEach(t => { if(!seen[t.id]){ seen[t.id] = 1; out.push(t); } });
@@ -3052,10 +3058,13 @@ window.__dbg = {
 };
 
 resetCachesIfNeeded();
-if(localStorage.getItem("mail.todover") !== CACHE_VER + "." + RULE_VER){
-  settings.todo = []; settings.scan = {}; settings.triage = {}; flush();
-  try { localStorage.setItem("mail.todover", CACHE_VER + "." + RULE_VER); } catch(e){}
-}
+const TODOVER = CACHE_VER + "." + RULE_VER;
+if(localStorage.getItem("mail.todover") !== TODOVER && settings.todover !== TODOVER){
+  settings.todo = []; settings.scan = {}; settings.triage = {}; settings.todover = TODOVER; flush();
+  try { localStorage.setItem("mail.todover", TODOVER); } catch(e){}
+} else if(settings.todover !== TODOVER){ settings.todover = TODOVER; flush(); }
+// 保存の書き込みが失敗している端末では、貯めた要返信が毎回消えて作り直しになる。気づけるようにする。
+setTimeout(() => { if(store.failed || !store.persistent) banner("この端末の保存領域が一杯です。設定の「覚えたことを忘れる」で空けると直ります。"); }, 3000);
 applyFs();
 updateDock();
 renderFilters();
