@@ -467,7 +467,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v54";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v55";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -662,7 +662,7 @@ const save  = () => { clearTimeout(saveTimer); saveTimer = setTimeout(flush, 400
 // 保存の形を変えたときは、古い保存を捨ててやり直す。
 // 混ざったまま使うと、表示が欠けたり順序が壊れたりする。
 const CACHE_VER = "6";
-const RULE_VER = "4";   // 要返信の判定を変えたら上げる
+const RULE_VER = "5";   // 要返信の判定を変えたら上げる
 function resetCachesIfNeeded(){
   let cur = null;
   try { cur = localStorage.getItem("mail.cachever"); } catch(e){ return; }
@@ -950,13 +950,14 @@ function doneKey(t){ return t.id + "|" + (t.msgId || ""); }
 // 本文の書き出しで判断していたが、一覧の本文は改行の潰れた抜粋なので当てにならず、
 // 署名の自分の名前まで拾って揺れていた。宛先だけで決める。
 function addressedToMe(t){
+  // 高崎さんの指定した2条件のどちらかで出す:
+  //  A. 宛先（To）に高崎のアドレスが入っている（書き出しに名前が無くてもよい）
+  //  B. 書き出しに「高崎」がある — 高崎さま・高崎様・高崎さん・呼び捨てすべて。
+  //     （アドレスが Cc にしか無い場合もこちらで拾う）
   const to = addrList(t.toAll || t.to || "");
-  const cc = addrList(t.ccAll || "");
-  if(!to.some(p => MINE.test(p.addr || ""))) return false;      // To に自分がいない
-  if(to.length === 1 && cc.length === 0) return true;           // 自分だけに届いた
-  const head = String(t.body || "").slice(0, 40);               // 書き出しの宛名を見る
-  if(/各位|皆様|皆さま|みなさま|関係者/.test(head)) return false;  // 一斉の呼びかけ
-  return /高崎|takasaki/i.test(head);                            // 名指しされている
+  if(to.some(p => MINE.test(p.addr || ""))) return true;        // A
+  const head = String(t.body || "").slice(0, 60);
+  return /高崎|takasaki/i.test(head);                            // B
 }
 function needsReply(t){
   if(t.replied) return false;              // 自分が返したものは出さない
