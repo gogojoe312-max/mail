@@ -467,7 +467,7 @@ const SIGNATURE = [
   "Email : j-takasaki@ufg.co.jp"
 ].join("\n");
 
-const BUILD = "v52";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
+const BUILD = "v53";   // 設定の一番下に出る。公開のたびに v2, v3 と上げる。
 const ACCOUNT = "j-takasaki@ufg.co.jp";
 const VIA     = "j-takasaki@bu.k-cloud90.biz";
 
@@ -654,7 +654,7 @@ let settings = migrate(store.get(KEY)) || {
   schema: SCHEMA, level:"mid", memo:"", endpoint:"", token:"", fast:false, apiKey:"",
   terms: DEFAULT_TERMS.slice(), intents: DEFAULT_INTENTS.slice(), done: {}, todo: [],
   samples: {}, edits: [], rev: 0, draft: null,
-  tone: {}, triage: {}, aiTriage: false, preflight: true, waitDone: {}, scan: {}, fs: 1, names: {}, rewrites: {}, rwNo: {}
+  tone: {}, preflight: true, waitDone: {}, scan: {}, fs: 1, names: {}, rewrites: {}, rwNo: {}
 };
 
 let saveTimer = null;
@@ -662,7 +662,7 @@ const save  = () => { clearTimeout(saveTimer); saveTimer = setTimeout(flush, 400
 // 保存の形を変えたときは、古い保存を捨ててやり直す。
 // 混ざったまま使うと、表示が欠けたり順序が壊れたりする。
 const CACHE_VER = "6";
-const RULE_VER = "3";   // 要返信の判定を変えたら上げる
+const RULE_VER = "4";   // 要返信の判定を変えたら上げる
 function resetCachesIfNeeded(){
   let cur = null;
   try { cur = localStorage.getItem("mail.cachever"); } catch(e){ return; }
@@ -963,9 +963,7 @@ function needsReply(t){
   if(MINE.test(t.addr || "")) return false;
   if(settings.done[doneKey(t)]) return false;
   if(!addressedToMe(t)) return false;      // 高崎宛てと名指しされていないものは、どの判定でも入れない
-  // AI判定は「名指しの中から、返事の要らないものを外す」ためだけに使う。拾い足しはしない。
-  if(settings.aiTriage && (settings.triage || {})[t.msgId] === 0) return false;
-  return true;
+  return true;                             // 名指しの未返信は必ず出す。AIには外させない。
 }
 // 要返信は端末に貯める。取得できた範囲の外に出ても消えないようにする。
 // 相手ごとの文体を覚える。開いた瞬間にその相手の温度に切り替わる。
@@ -990,33 +988,6 @@ function slimThread(t){
 }
 // 規則だけでは拾いきれないので、AIに本文を読ませて返事が要るかを判定する。
 // 判定した結果は覚えておき、同じメールを二度は見ない。
-async function aiTriage(list){
-  if(!settings.aiTriage || !settings.apiKey) return;
-  const box = settings.triage || (settings.triage = {});
-  const pending = list.filter(t => addressedToMe(t) && box[t.msgId] === undefined).slice(0, 20);
-  if(!pending.length) return;
-  const sys = [
-    "高崎晟宛てに名指しで届いたメールが「高崎晟本人の返事を必要としているか」を判定する。",
-    "返事が要る: 質問されている、依頼されている、可否や日程の回答を求められている、確認を頼まれている。",
-    "返事が不要: 報告や共有だけ、一斉配信、自動送信、案内、Ccで回ってきただけのもの、すでに話が完結しているもの。",
-    "宛先の人数は判断材料にしてよいが、名指しで問われていれば人数が多くても返事が要る。",
-    "",
-    "出力は番号だけをカンマ区切りで並べる。返事が要るものの番号のみ。ひとつも無ければ none とだけ書く。",
-    "説明や前置きは一切書かない。"
-  ].join("\n");
-  const usr = pending.map((t,i) =>
-    [ "#" + i, "差出人: " + (t.from||""), "件名: " + (t.subject||""),
-      "本文: " + String(t.body||"").slice(0,220) ].join("\n")).join("\n---\n");
-  try{
-    const raw = await aiText(sys, usr, null, 200);
-    const hit = {};
-    String(raw).replace(/\d+/g, n => { hit[+n] = 1; return n; });
-    pending.forEach((t,i) => { box[t.msgId] = hit[i] ? 1 : 0; });
-    const keys = Object.keys(box);
-    if(keys.length > 400) keys.slice(0, keys.length - 400).forEach(k => delete box[k]);
-    flush();
-  }catch(e){}
-}
 
 function mergeTodo(fetched){
   if(!fetched || !fetched.length) return;   // 取得が空のときは何もしない
@@ -1769,12 +1740,7 @@ async function load(opts){
         inboxAll = raw;
         mergeTodo(raw);
         // 判定と先読みは、一覧が出そろってから順に流す。同時に走らせると取得が遅くなる。
-        setTimeout(() => {
-          aiTriage(raw).then(() => {
-            mergeTodo(raw); renderFilters();
-            if(currentBox === "TODO"){ threads = boxView([]); renderList(); }
-          }).then(() => prefetchTop(raw)).then(() => warmWait());
-        }, 1200);
+        setTimeout(() => { prefetchTop(raw); warmWait(); }, 1200);
       }
     }
     // 箱が変わった、または新しい取得が始まっていたら、この結果は捨てる。
@@ -2834,9 +2800,6 @@ ${settings.apiKey ? `保存されている値: ${settings.apiKey.length}文字 /
       <button class="sh-btn" id="btnRescan">先頭に戻す</button></div>
 
     <div class="sh-sec">AI の働き</div>
-    <div class="sh-row"><div class="k"><div class="n">${settings.aiTriage ? "要返信をAIが判定" : "要返信を規則で判定"}</div>
-      <div class="d">高崎宛てのメールの中から、返事の要らないもの（報告・共有だけ等）を外します。宛先と書き出しの名指し判定は常に効きます。</div></div>
-      <button class="sh-btn" id="btnTriage">${settings.aiTriage ? "規則にする" : "AIにする"}</button></div>
     <div class="sh-row"><div class="k"><div class="n">${settings.preflight ? "送る前に点検する" : "点検しない"}</div>
       <div class="d">答え漏れ・日付の食い違い・添付の言い忘れ・表記ゆれを送信前に見ます。
 指摘が出たら止まり、もう一度押すとそのまま送ります。</div></div>
@@ -2899,7 +2862,6 @@ ${settings.apiKey ? `保存されている値: ${settings.apiKey.length}文字 /
     settings.done = {}; settings.waitDone = {}; flush(); pushState(); renderSheet();
   };
   $("btnRescan").onclick = () => { settings.scan = {}; flush(); renderSheet(); };
-  $("btnTriage").onclick = () => { settings.aiTriage = !settings.aiTriage; flush(); renderSheet(); };
   $("btnPre").onclick = () => { settings.preflight = !settings.preflight; flush(); renderSheet(); };
   $("btnForget").onclick = () => { settings.samples = {}; settings.edits = []; settings.names = {}; flush(); renderSheet(); };
   $("inKey").oninput = e => { settings.apiKey = e.target.value.replace(/\s+/g, ""); save(); };
